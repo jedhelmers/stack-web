@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@source "./**/*.{html,tsx,ts}";
+
+/* The shell never scrolls. Every scroll happens inside a designated panel
+   (chat message list, dashboard tables, modal bodies). */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
