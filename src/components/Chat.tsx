@@ -5,7 +5,9 @@ import {
   ALargeSmall,
   AtSign,
   Bold,
+  Archive,
   ChevronDown,
+  MoreVertical,
   Pencil,
   Search,
   Trash2,
@@ -31,7 +33,9 @@ import {
 } from 'lucide-react'
 import {
   uploadAttachment,
+  useArchiveChannel,
   useChannels,
+  useDeleteChannel,
   useDeleteMessage,
   useEditMessage,
   useSearchMessages,
@@ -311,6 +315,14 @@ export function Chat({
             members={members}
             currentUserID={user.id}
             realtimeOpen={rtState === 'open'}
+            isWorkspaceAdmin={isWorkspaceAdmin}
+            onChannelGone={() => {
+              // Drop local selection; the auto-select effect picks #general (or
+              // the first remaining channel) once the channels query refetches.
+              // URL may briefly point at the now-gone channel; the user's next
+              // click on the sidebar updates it.
+              setInternalChannelId(null)
+            }}
             scrollTargetMessageId={
               scrollTarget && scrollTarget.channelId === activeChannel.id
                 ? scrollTarget.messageId
@@ -1321,6 +1333,8 @@ function ChannelView({
   realtimeOpen,
   scrollTargetMessageId,
   onScrollHandled,
+  isWorkspaceAdmin,
+  onChannelGone,
 }: {
   channel: Channel
   workspaceSlug: string
@@ -1329,18 +1343,29 @@ function ChannelView({
   realtimeOpen: boolean
   scrollTargetMessageId: string | null
   onScrollHandled: () => void
+  isWorkspaceAdmin: boolean
+  onChannelGone: () => void
 }) {
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
   const isDM = channel.kind === 'dm' || channel.kind === 'group_dm'
   const typingUserIDs = useTypingState(channel.id, currentUserID)
   return (
     <>
-      <header className="border-b border-zinc-800 px-4 py-3">
-        <h1 className="text-lg font-semibold">
-          <span className="text-zinc-500">{isDM ? '@ ' : '# '}</span>
-          {channel.slug ?? channel.name ?? '(dm)'}
-        </h1>
-        {channel.topic && <p className="text-xs text-zinc-400">{channel.topic}</p>}
+      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+        <div>
+          <h1 className="text-lg font-semibold">
+            <span className="text-zinc-500">{isDM ? '@ ' : '# '}</span>
+            {channel.slug ?? channel.name ?? '(dm)'}
+          </h1>
+          {channel.topic && <p className="text-xs text-zinc-400">{channel.topic}</p>}
+        </div>
+        {!isDM && isWorkspaceAdmin && (
+          <ChannelSettingsMenu
+            channel={channel}
+            workspaceSlug={workspaceSlug}
+            onGone={onChannelGone}
+          />
+        )}
       </header>
 
       <MessageList
@@ -1358,6 +1383,90 @@ function ChannelView({
         archived={channel.archived}
       />
     </>
+  )
+}
+
+// ChannelSettingsMenu — gear-icon dropdown in the channel header.
+// Workspace-admin gated by the parent (we don't double-check here).
+// Once an action commits, the channel disappears from listings; the
+// "channel disappeared" effect in <Chat> auto-navigates to a fallback.
+function ChannelSettingsMenu({
+  channel,
+  workspaceSlug,
+  onGone,
+}: {
+  channel: Channel
+  workspaceSlug: string
+  onGone: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const archive = useArchiveChannel(workspaceSlug)
+  const del = useDeleteChannel(workspaceSlug)
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!ref.current) return
+      if (!ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [])
+
+  function handleArchive() {
+    if (!confirm(`Archive #${channel.slug ?? channel.name ?? ''}? Members will lose it from their sidebar.`)) return
+    archive.mutate(channel.id, {
+      onSuccess: () => {
+        setOpen(false)
+        onGone()
+      },
+    })
+  }
+  function handleDelete() {
+    if (!confirm(
+      `Delete #${channel.slug ?? channel.name ?? ''}? This is permanent — the channel and its history disappear from the UI.`,
+    )) return
+    del.mutate(channel.id, {
+      onSuccess: () => {
+        setOpen(false)
+        onGone()
+      },
+    })
+  }
+
+  const pending = archive.isPending || del.isPending
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Channel settings"
+        disabled={pending}
+        className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-9 z-20 w-48 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+          <button
+            onClick={handleArchive}
+            disabled={pending}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            <Archive className="h-4 w-4 text-zinc-400" />
+            Archive channel
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={pending}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-rose-400 hover:bg-rose-950/40 disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete channel
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

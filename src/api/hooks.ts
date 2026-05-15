@@ -114,12 +114,16 @@ export type MessagesPage = { messages: Message[]; next_cursor?: string }
 type MessagesInfiniteData = InfiniteData<MessagesPage, string | undefined>
 
 function applyRealtimeEvent(qc: QueryClient, ev: RealtimeEvent) {
-  // All current event types act on a channel's message list. Update the cache
-  // for that channel; if it isn't loaded, the next fetch will pull fresh data.
-  const key = ['messages', ev.channel_id]
+  // useMessages keys queries by ['messages', channelId, anchorId ?? ''] so
+  // changing the anchor (e.g. from a search-result jump) gets a fresh fetch.
+  // Realtime patches need to update EVERY cached variant for the channel —
+  // both the no-anchor "live" view and any anchor-scoped views the user
+  // happens to have visited. setQueriesData with a prefix-only key + exact:false
+  // matches all of them.
+  const filter = { queryKey: ['messages', ev.channel_id], exact: false } as const
   switch (ev.type) {
     case 'message.created': {
-      qc.setQueryData<MessagesInfiniteData>(key, (prev) => {
+      qc.setQueriesData<MessagesInfiniteData>(filter, (prev) => {
         if (!prev || prev.pages.length === 0) return prev
         // De-dup across all pages (the poster gets the optimistic POST result first).
         if (prev.pages.some((p) => p.messages.some((m) => m.id === ev.message_id))) {
@@ -140,7 +144,7 @@ function applyRealtimeEvent(qc: QueryClient, ev: RealtimeEvent) {
       break
     }
     case 'message.updated': {
-      qc.setQueryData<MessagesInfiniteData>(key, (prev) => {
+      qc.setQueriesData<MessagesInfiniteData>(filter, (prev) => {
         if (!prev) return prev
         return {
           ...prev,
@@ -153,7 +157,7 @@ function applyRealtimeEvent(qc: QueryClient, ev: RealtimeEvent) {
       break
     }
     case 'message.deleted': {
-      qc.setQueryData<MessagesInfiniteData>(key, (prev) => {
+      qc.setQueriesData<MessagesInfiniteData>(filter, (prev) => {
         if (!prev) return prev
         return {
           ...prev,
@@ -235,55 +239,65 @@ export function usePostMessage(channelId: string | null) {
       // before the WS event lands. Realtime patcher de-dups by id, and we avoid
       // invalidate so older pages (loaded by scroll) don't refetch and yank
       // the viewport.
-      qc.setQueryData<MessagesInfiniteData>(['messages', channelId], (prev) => {
-        if (!prev || prev.pages.length === 0) return prev
-        if (prev.pages.some((p) => p.messages.some((m) => m.id === msg.id))) {
-          return prev
-        }
-        const first = prev.pages[0]!
-        const rest = prev.pages.slice(1)
-        return {
-          ...prev,
-          pages: [{ ...first, messages: [msg, ...first.messages] }, ...rest],
-        }
-      })
+      qc.setQueriesData<MessagesInfiniteData>(
+        { queryKey: ['messages', channelId], exact: false },
+        (prev) => {
+          if (!prev || prev.pages.length === 0) return prev
+          if (prev.pages.some((p) => p.messages.some((m) => m.id === msg.id))) {
+            return prev
+          }
+          const first = prev.pages[0]!
+          const rest = prev.pages.slice(1)
+          return {
+            ...prev,
+            pages: [{ ...first, messages: [msg, ...first.messages] }, ...rest],
+          }
+        },
+      )
     },
   })
 }
 
 // ---- message edit / delete / reactions -------------------------------------
 
-// Helper: patch one message in the infinite cache for a channel.
+// Helper: patch one message in every cached variant for a channel (live view
+// + any anchor-scoped views, since useMessages keys queries by anchorId too).
 function patchMessage(
   qc: QueryClient,
   channelId: string,
   messageId: string,
   fn: (m: Message) => Message,
 ) {
-  qc.setQueryData<MessagesInfiniteData>(['messages', channelId], (prev) => {
-    if (!prev) return prev
-    return {
-      ...prev,
-      pages: prev.pages.map((p) => ({
-        ...p,
-        messages: p.messages.map((m) => (m.id === messageId ? fn(m) : m)),
-      })),
-    }
-  })
+  qc.setQueriesData<MessagesInfiniteData>(
+    { queryKey: ['messages', channelId], exact: false },
+    (prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        pages: prev.pages.map((p) => ({
+          ...p,
+          messages: p.messages.map((m) => (m.id === messageId ? fn(m) : m)),
+        })),
+      }
+    },
+  )
 }
 
-// Helper: drop one message from the infinite cache for a channel.
+// Helper: drop one message from every cached variant for a channel.
 function dropMessage(qc: QueryClient, channelId: string, messageId: string) {
-  qc.setQueryData<MessagesInfiniteData>(['messages', channelId], (prev) => {
-    if (!prev) return prev
-    return {
-      ...prev,
-      pages: prev.pages.map((p) => ({
-        ...p,
-        messages: p.messages.filter((m) => m.id !== messageId),
-      })),
-    }
-  })
+  qc.setQueriesData<MessagesInfiniteData>(
+    { queryKey: ['messages', channelId], exact: false },
+    (prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        pages: prev.pages.map((p) => ({
+          ...p,
+          messages: p.messages.filter((m) => m.id !== messageId),
+        })),
+      }
+    },
+  )
 }
 
 export function useEditMessage(channelId: string | null) {
@@ -560,6 +574,33 @@ export function useTypingNotifier(channelId: string | null) {
   }, [stop])
 
   return { notify, stop }
+}
+
+// useArchiveChannel hides a channel for everyone in the workspace.
+// Workspace-admin gated server-side; the UI also gates the affordance.
+export function useArchiveChannel(slug: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (channelId: string) =>
+      api.post(`/v1/channels/${channelId}/archive`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['channels', slug] })
+      qc.invalidateQueries({ queryKey: ['public-channels', slug] })
+    },
+  })
+}
+
+// useDeleteChannel soft-deletes a channel (sets deleted_at). Permanent from
+// the UI's perspective; row stays in the DB for audit / future hard-purge.
+export function useDeleteChannel(slug: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (channelId: string) => api.del(`/v1/channels/${channelId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['channels', slug] })
+      qc.invalidateQueries({ queryKey: ['public-channels', slug] })
+    },
+  })
 }
 
 // useLeaveChannel soft-removes the caller from a channel by setting
