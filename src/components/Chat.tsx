@@ -1,5 +1,29 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
+  ALargeSmall,
+  AtSign,
+  Bold,
+  ChevronDown,
+  Code,
+  FileCode,
+  FileText,
+  Italic,
+  Link as LinkIcon,
+  List,
+  ListOrdered,
+  Mic,
+  Paperclip,
+  Plus,
+  Quote,
+  SendHorizontal,
+  Slash,
+  Smile,
+  Strikethrough,
+  Underline,
+  Video,
+  X,
+} from 'lucide-react'
+import {
   uploadAttachment,
   useChannels,
   useTypingNotifier,
@@ -1155,7 +1179,7 @@ function AttachmentView({ a }: { a: AttachmentFile }) {
         rel="noopener noreferrer"
         className="inline-flex items-center gap-2 rounded border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
       >
-        <span className="text-xl">📄</span>
+        <Paperclip className="h-5 w-5 text-zinc-400" />
         <span className="flex flex-col min-w-0">
           <span className="truncate font-medium">{a.filename}</span>
           <span className="text-xs text-zinc-500">{human(a.bytes)} · {a.mime_type}</span>
@@ -1325,56 +1349,61 @@ function Composer({
   const canSend = !post.isPending && !stillUploading && (
     text.trim().length > 0 || pending.some((p) => p.status === 'ready')
   )
+  const [showFormatBar, setShowFormatBar] = useState(true)
+
+  // Stub callback used by every not-yet-implemented icon. Easier to swap in
+  // real handlers later than to wire onClick={undefined} everywhere.
+  const stub = () => {}
 
   return (
-    <div
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        send()
+      }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={
-        'border-t border-zinc-800 p-3 ' +
-        (dragActive ? 'bg-zinc-900/60 ring-2 ring-inset ring-zinc-500' : '')
-      }
+      className="border-t border-zinc-800 p-3"
     >
-      {pending.length > 0 && (
-        <ul className="mb-2 flex flex-wrap gap-2">
-          {pending.map((p) => (
-            <PendingAttachmentChip
-              key={p.localId}
-              p={p}
-              onRemove={() => removeAttachment(p.localId)}
-            />
-          ))}
-        </ul>
-      )}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          send()
-        }}
-        className="flex items-end gap-2"
+      <div
+        className={
+          'rounded-lg border border-zinc-700 bg-zinc-900/40 ' +
+          (dragActive ? 'ring-2 ring-zinc-400' : '')
+        }
       >
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={archived || pending.length >= MAX_PER_MESSAGE}
-          title={archived ? 'Channel is archived' : 'Attach a file'}
-          className="rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-300 hover:bg-zinc-800 disabled:opacity-30"
-        >
-          📎
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            const files = Array.from(e.target.files ?? [])
-            addFiles(files)
-            if (e.target) e.target.value = '' // allow re-selecting same file
-          }}
-        />
+        {/* ── formatting toolbar ─────────────────────────────────────────── */}
+        {showFormatBar && (
+          <div className="flex items-center gap-0.5 border-b border-zinc-800 px-2 py-1.5">
+            <ToolbarBtn title="Bold (⌘B)" onClick={stub}><Bold className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Italic (⌘I)" onClick={stub}><Italic className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Underline (⌘U)" onClick={stub}><Underline className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Strikethrough (⌘⇧X)" onClick={stub}><Strikethrough className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarSep />
+            <ToolbarBtn title="Link (⌘K)" onClick={stub}><LinkIcon className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Numbered list" onClick={stub}><ListOrdered className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Bulleted list" onClick={stub}><List className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarSep />
+            <ToolbarBtn title="Blockquote" onClick={stub}><Quote className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Inline code" onClick={stub}><Code className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Code block" onClick={stub}><FileCode className="h-4 w-4" /></ToolbarBtn>
+          </div>
+        )}
+
+        {/* ── pending attachments (preview + progress) ──────────────────── */}
+        {pending.length > 0 && (
+          <ul className="flex flex-wrap gap-2 px-3 pt-2">
+            {pending.map((p) => (
+              <PendingAttachmentChip
+                key={p.localId}
+                p={p}
+                onRemove={() => removeAttachment(p.localId)}
+              />
+            ))}
+          </ul>
+        )}
+
+        {/* ── textarea ──────────────────────────────────────────────────── */}
         <textarea
           value={text}
           onChange={(e) => {
@@ -1391,24 +1420,123 @@ function Composer({
               send()
             }
           }}
-          placeholder={archived ? 'Channel is archived' : 'Message… (drop files or paste images)'}
+          placeholder={archived ? 'Channel is archived' : 'Message…'}
           disabled={archived}
           rows={2}
-          className="flex-1 resize-none rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+          className="block w-full resize-none border-0 bg-transparent px-3 py-2 text-zinc-100 focus:outline-none disabled:opacity-50"
         />
-        <button
-          type="submit"
-          disabled={!canSend}
-          className="rounded bg-zinc-100 text-zinc-900 px-4 py-2 font-medium hover:bg-white disabled:opacity-50"
-        >
-          {stillUploading ? 'Uploading…' : 'Send'}
-        </button>
-      </form>
+
+        {/* ── action bar ───────────────────────────────────────────────── */}
+        <div className="flex items-center gap-0.5 border-t border-zinc-800 px-2 py-1.5">
+          <ToolbarBtn
+            title={archived ? 'Channel is archived' : 'Attach a file'}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={archived || pending.length >= MAX_PER_MESSAGE}
+          >
+            <Plus className="h-4 w-4" />
+          </ToolbarBtn>
+          <ToolbarBtn
+            title={showFormatBar ? 'Hide formatting' : 'Show formatting'}
+            onClick={() => setShowFormatBar((v) => !v)}
+            active={showFormatBar}
+          >
+            <ALargeSmall className="h-4 w-4" />
+          </ToolbarBtn>
+          <ToolbarBtn title="Emoji" onClick={stub}><Smile className="h-4 w-4" /></ToolbarBtn>
+          <ToolbarBtn title="Mention someone" onClick={stub}><AtSign className="h-4 w-4" /></ToolbarBtn>
+          <ToolbarSep />
+          <ToolbarBtn title="Record video clip" onClick={stub}><Video className="h-4 w-4" /></ToolbarBtn>
+          <ToolbarBtn title="Record audio clip" onClick={stub}><Mic className="h-4 w-4" /></ToolbarBtn>
+          <ToolbarSep />
+          <ToolbarBtn title="Slash command" onClick={stub}><Slash className="h-4 w-4" /></ToolbarBtn>
+
+          <div className="ml-auto flex items-center">
+            <button
+              type="submit"
+              disabled={!canSend}
+              title={stillUploading ? 'Uploading…' : 'Send'}
+              className={
+                'flex h-7 w-7 items-center justify-center rounded transition-colors ' +
+                (canSend
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                  : 'text-zinc-600')
+              }
+            >
+              <SendHorizontal className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Send options"
+              onClick={stub}
+              disabled={!canSend}
+              className={
+                'flex h-7 w-5 items-center justify-center rounded transition-colors ' +
+                (canSend
+                  ? 'bg-emerald-700 text-white hover:bg-emerald-600 ml-px'
+                  : 'text-zinc-600 ml-px')
+              }
+            >
+              <ChevronDown className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? [])
+            addFiles(files)
+            if (e.target) e.target.value = '' // allow re-selecting same file
+          }}
+        />
+      </div>
+
       {post.error && (
         <p className="mt-1 text-xs text-rose-400">{String(post.error)}</p>
       )}
-    </div>
+    </form>
   )
+}
+
+// ── small toolbar atoms ───────────────────────────────────────────────────
+
+function ToolbarBtn({
+  title,
+  onClick,
+  disabled,
+  active,
+  children,
+}: {
+  title: string
+  onClick: () => void
+  disabled?: boolean
+  active?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        'flex h-7 w-7 items-center justify-center rounded transition-colors ' +
+        (active
+          ? 'bg-zinc-700 text-zinc-100'
+          : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100') +
+        ' disabled:opacity-30 disabled:hover:bg-transparent'
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+function ToolbarSep() {
+  return <span className="mx-1 h-4 w-px bg-zinc-700" aria-hidden />
 }
 
 function PendingAttachmentChip({
@@ -1424,8 +1552,8 @@ function PendingAttachmentChip({
       {isImg && p.previewURL ? (
         <img src={p.previewURL} alt="" className="h-12 w-12 object-cover rounded" />
       ) : (
-        <div className="h-12 w-12 flex items-center justify-center rounded bg-zinc-900 text-2xl">
-          📄
+        <div className="h-12 w-12 flex items-center justify-center rounded bg-zinc-900 text-zinc-400">
+          <FileText className="h-6 w-6" />
         </div>
       )}
       <div className="min-w-0 flex-1">
@@ -1450,10 +1578,10 @@ function PendingAttachmentChip({
       <button
         type="button"
         onClick={onRemove}
-        className="text-xs text-zinc-500 hover:text-zinc-200 px-1"
+        className="text-zinc-500 hover:text-zinc-200 px-1"
         aria-label="Remove attachment"
       >
-        ×
+        <X className="h-3.5 w-3.5" />
       </button>
     </li>
   )
