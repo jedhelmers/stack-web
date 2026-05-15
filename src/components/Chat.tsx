@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { Editor } from '@tiptap/react'
+import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
 import {
   ALargeSmall,
   AtSign,
@@ -1138,9 +1140,13 @@ function MessageItem({ m, member }: { m: Message; member?: Member }) {
         <span className="text-xs text-zinc-500">{ts}</span>
         {m.edited_at && <span className="text-xs text-zinc-600">(edited)</span>}
       </div>
-      {m.text && (
+      {m.payload ? (
+        <div className="text-zinc-300 break-words">
+          <MessageRender doc={m.payload as import('@tiptap/react').JSONContent} />
+        </div>
+      ) : m.text ? (
         <p className="text-zinc-300 whitespace-pre-wrap break-words">{m.text}</p>
-      )}
+      ) : null}
       {m.attachments && m.attachments.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-2">
           {m.attachments.map((a) => (
@@ -1212,12 +1218,31 @@ function Composer({
   workspaceSlug: string
   archived: boolean
 }) {
-  const [text, setText] = useState('')
   const [pending, setPending] = useState<PendingAttachment[]>([])
   const [dragActive, setDragActive] = useState(false)
+  const [hasContent, setHasContent] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const post = usePostMessage(channelId)
   const typing = useTypingNotifier(channelId)
+
+  // Bookkeeping refs let send/onUpdate read state without re-creating the editor.
+  const editorRef = useRef<Editor | null>(null)
+  const sendRef = useRef<() => void>(() => {})
+
+  const editor = useChatEditor({
+    placeholder: archived ? 'Channel is archived' : 'Message…',
+    disabled: archived,
+    onUpdate(e) {
+      const empty = docIsEmpty(e.getJSON())
+      setHasContent(!empty)
+      if (!empty) typing.notify()
+      else typing.stop()
+    },
+    onSubmit() {
+      sendRef.current()
+    },
+  })
+  editorRef.current = editor
 
   // Whatever's mounted gets its preview URLs revoked on unmount.
   useEffect(
@@ -1291,7 +1316,10 @@ function Composer({
   }
 
   function send() {
-    const trimmed = text.trim()
+    const e = editorRef.current
+    const trimmed = e ? e.getText().trim() : ''
+    const json = e ? e.getJSON() : undefined
+    const richEmpty = docIsEmpty(json)
     const ready = pending.filter((p) => p.status === 'ready' && p.finalized)
     const stillUploading = pending.some((p) => p.status === 'uploading' || p.status === 'queued')
     if (stillUploading) return
@@ -1299,10 +1327,17 @@ function Composer({
     const fileIDs = ready.map((p) => p.finalized!.id)
     typing.stop()
     post.mutate(
-      { text: trimmed || '', file_ids: fileIDs.length > 0 ? fileIDs : undefined },
+      {
+        text: trimmed,
+        // Only send payload when there's actually rich structure to preserve.
+        // A bare paragraph round-trips fine via plain text alone.
+        payload: !richEmpty ? json : undefined,
+        file_ids: fileIDs.length > 0 ? fileIDs : undefined,
+      },
       {
         onSuccess: () => {
-          setText('')
+          e?.commands.clearContent()
+          setHasContent(false)
           // Clean up previews.
           pending.forEach((p) => {
             if (p.previewURL) URL.revokeObjectURL(p.previewURL)
@@ -1312,6 +1347,7 @@ function Composer({
       },
     )
   }
+  sendRef.current = send
 
   // Drag-drop on the composer card.
   function onDragOver(e: React.DragEvent) {
@@ -1347,13 +1383,41 @@ function Composer({
 
   const stillUploading = pending.some((p) => p.status === 'uploading' || p.status === 'queued')
   const canSend = !post.isPending && !stillUploading && (
-    text.trim().length > 0 || pending.some((p) => p.status === 'ready')
+    hasContent || pending.some((p) => p.status === 'ready')
   )
   const [showFormatBar, setShowFormatBar] = useState(true)
 
-  // Stub callback used by every not-yet-implemented icon. Easier to swap in
-  // real handlers later than to wire onClick={undefined} everywhere.
+  // Stub callback used by every not-yet-implemented icon (emoji, mentions,
+  // video/audio, slash commands). Easier to swap in real handlers later than
+  // to wire onClick={undefined} everywhere.
   const stub = () => {}
+
+  // ── editor command helpers — keep .focus() before each chain so the
+  // ── selection survives a click on the toolbar.
+  const cmd = {
+    bold:        () => editor?.chain().focus().toggleBold().run(),
+    italic:      () => editor?.chain().focus().toggleItalic().run(),
+    underline:   () => editor?.chain().focus().toggleUnderline().run(),
+    strike:      () => editor?.chain().focus().toggleStrike().run(),
+    olist:       () => editor?.chain().focus().toggleOrderedList().run(),
+    ulist:       () => editor?.chain().focus().toggleBulletList().run(),
+    quote:       () => editor?.chain().focus().toggleBlockquote().run(),
+    code:        () => editor?.chain().focus().toggleCode().run(),
+    codeBlock:   () => editor?.chain().focus().toggleCodeBlock().run(),
+    link: () => {
+      if (!editor) return
+      const prev = editor.getAttributes('link').href as string | undefined
+      const url = window.prompt('Link URL', prev ?? 'https://')
+      if (url === null) return
+      if (url === '') {
+        editor.chain().focus().extendMarkRange('link').unsetLink().run()
+        return
+      }
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+    },
+  }
+  const isActive = (mark: string, attrs?: Record<string, unknown>) =>
+    !!editor?.isActive(mark, attrs)
 
   return (
     <form
@@ -1368,25 +1432,25 @@ function Composer({
     >
       <div
         className={
-          'rounded-lg border border-zinc-700 bg-zinc-900/40 ' +
+          'rounded-lg bg-zinc-900/40 ' +
           (dragActive ? 'ring-2 ring-zinc-400' : '')
         }
       >
         {/* ── formatting toolbar ─────────────────────────────────────────── */}
         {showFormatBar && (
           <div className="flex items-center gap-0.5 border-b border-zinc-800 px-2 py-1.5">
-            <ToolbarBtn title="Bold (⌘B)" onClick={stub}><Bold className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Italic (⌘I)" onClick={stub}><Italic className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Underline (⌘U)" onClick={stub}><Underline className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Strikethrough (⌘⇧X)" onClick={stub}><Strikethrough className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Bold (⌘B)" onClick={cmd.bold} active={isActive('bold')}><Bold className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Italic (⌘I)" onClick={cmd.italic} active={isActive('italic')}><Italic className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Underline (⌘U)" onClick={cmd.underline} active={isActive('underline')}><Underline className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Strikethrough (⌘⇧X)" onClick={cmd.strike} active={isActive('strike')}><Strikethrough className="h-4 w-4" /></ToolbarBtn>
             <ToolbarSep />
-            <ToolbarBtn title="Link (⌘K)" onClick={stub}><LinkIcon className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Numbered list" onClick={stub}><ListOrdered className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Bulleted list" onClick={stub}><List className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Link (⌘K)" onClick={cmd.link} active={isActive('link')}><LinkIcon className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Numbered list" onClick={cmd.olist} active={isActive('orderedList')}><ListOrdered className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Bulleted list" onClick={cmd.ulist} active={isActive('bulletList')}><List className="h-4 w-4" /></ToolbarBtn>
             <ToolbarSep />
-            <ToolbarBtn title="Blockquote" onClick={stub}><Quote className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Inline code" onClick={stub}><Code className="h-4 w-4" /></ToolbarBtn>
-            <ToolbarBtn title="Code block" onClick={stub}><FileCode className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Blockquote" onClick={cmd.quote} active={isActive('blockquote')}><Quote className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Inline code" onClick={cmd.code} active={isActive('code')}><Code className="h-4 w-4" /></ToolbarBtn>
+            <ToolbarBtn title="Code block" onClick={cmd.codeBlock} active={isActive('codeBlock')}><FileCode className="h-4 w-4" /></ToolbarBtn>
           </div>
         )}
 
@@ -1404,27 +1468,16 @@ function Composer({
         )}
 
         {/* ── textarea ──────────────────────────────────────────────────── */}
-        <textarea
-          value={text}
-          onChange={(e) => {
-            const next = e.target.value
-            setText(next)
-            if (next.trim().length > 0) typing.notify()
-            else typing.stop()
-          }}
-          onBlur={() => typing.stop()}
+        {/* TipTap handles keystrokes (incl. Enter→send via onSubmit) and
+             paste of formatted text. We still listen for file pastes here
+             so dropping an image into the editor flows into the upload pipe. */}
+        <div
           onPaste={onPaste}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              send()
-            }
-          }}
-          placeholder={archived ? 'Channel is archived' : 'Message…'}
-          disabled={archived}
-          rows={2}
-          className="block w-full resize-none border-0 bg-transparent px-3 py-2 text-zinc-100 focus:outline-none disabled:opacity-50"
-        />
+          onBlur={() => typing.stop()}
+          className="pl-4 pr-3 pt-2.5 pb-2.5"
+        >
+          <EditorView editor={editor} />
+        </div>
 
         {/* ── action bar ───────────────────────────────────────────────── */}
         <div className="flex items-center gap-0.5 border-t border-zinc-800 px-2 py-1.5">

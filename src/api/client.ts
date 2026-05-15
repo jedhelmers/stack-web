@@ -82,6 +82,11 @@ export type Message = {
   thread_root_id?: string
   kind: string
   text: string
+  // Rich content as TipTap JSON. Optional — older messages and plain-text
+  // posts have only `text`. The renderer falls back to text when this is
+  // missing or blank. We use `unknown` here because the `JSONContent` type
+  // lives in TipTap's package; consumers cast at use site.
+  payload?: unknown
   attachments?: AttachmentFile[]
   edited_at?: string
   deleted_at?: string

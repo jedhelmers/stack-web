@@ -214,7 +214,7 @@ export function useMessages(channelId: string | null, realtimeOpen: boolean = fa
 export function usePostMessage(channelId: string | null) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (vars: { text: string; file_ids?: string[] }) =>
+    mutationFn: (vars: { text: string; payload?: unknown; file_ids?: string[] }) =>
       api.post<Message>(`/v1/channels/${channelId}/messages`, vars),
     onSuccess: (msg) => {
       // Optimistic insert into page 0 so the message shows immediately, even

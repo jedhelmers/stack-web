@@ -10,3 +10,12 @@ body,
   height: 100%;
   overflow: hidden;
 }
+
+/* TipTap renders into a contentEditable div with a UA focus outline. The
+   composer card owns the focus styling; suppress the inner one here so the
+   browser doesn't draw a competing ring. */
+.ProseMirror,
+.ProseMirror:focus,
+.ProseMirror:focus-visible {
+  outline: none !important;
+}
