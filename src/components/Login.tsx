@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { useLogin } from '../api/hooks'
-import { APIError } from '../api/client'
+import { useLogin, APIError } from '@stack/client'
 
 export function Login() {
   const [email, setEmail] = useState('')

@@ -17,7 +17,7 @@ import {
   useOpSuspendWorkspace,
   useOpUnlockUser,
   useOpUnsuspendWorkspace,
-} from '../api/hooks'
+} from '@stack/client'
 import type {
   OperatorAuditEntry,
   OperatorChannel,
@@ -25,7 +25,7 @@ import type {
   OperatorUser,
   OperatorWorkspace,
   User,
-} from '../api/client'
+} from '@stack/client'
 
 type Tab = 'stats' | 'workspaces' | 'channels' | 'dms' | 'users' | 'audit' | 'health'
 

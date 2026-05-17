@@ -95,8 +95,8 @@ export function RightSidebar() {
   if (!slot) return null
   return (
     <aside className="flex w-[28rem] shrink-0 flex-col border-l border-zinc-800 bg-zinc-950 min-h-0">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <h2 className="text-sm font-semibold">{slot.title}</h2>
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
+        <h2 className="text-lg font-semibold">{slot.title}</h2>
         <button
           type="button"
           onClick={close}

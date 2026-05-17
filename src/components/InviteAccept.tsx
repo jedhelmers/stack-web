@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { useAcceptInvite } from '../api/hooks'
-import { APIError } from '../api/client'
+import { useAcceptInvite, APIError } from '@stack/client'
 
 export function InviteAccept({
   token,

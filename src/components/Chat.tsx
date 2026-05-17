@@ -2,12 +2,16 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { useQueryClient } from '@tanstack/react-query'
 import type { Editor } from '@tiptap/react'
 import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
+import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
+import { GiphyPicker } from './GiphyPicker'
 import { RightSidebar, useRightSidebar } from './RightSidebar'
+import { useModal } from './Modal'
 import {
   ALargeSmall,
   AtSign,
   Bold,
   Archive,
+  Bell,
   ChevronDown,
   MoreVertical,
   Pencil,
@@ -27,6 +31,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Paperclip,
+  Pin,
+  PinOff,
   Plus,
   Quote,
   SendHorizontal,
@@ -49,6 +55,18 @@ import {
   useToggleReaction,
   useTypingNotifier,
   useTypingState,
+  usePinMessage,
+  useUnpinMessage,
+  useChannelPins,
+  useMyMentions,
+  useMarkMentionsRead,
+  useWorkspaceMentionCounts,
+  getSlashCommand,
+  listSlashCommands,
+  parseSlashInput,
+  type SlashCommand,
+  type SlashCommandContext,
+  type MentionNotification,
   useCreateChannel,
   useCreateWorkspaceInvite,
   useDMs,
@@ -74,7 +92,7 @@ import {
   setCurrentUser,
   type MessagesInfiniteData,
   type UnreadMap,
-} from '../api/hooks'
+} from '@stack/client'
 import type {
   AttachmentFile,
   Channel,
@@ -84,7 +102,7 @@ import type {
   Member,
   Message,
   User,
-} from '../api/client'
+} from '@stack/client'
 
 type Props = {
   user: User
@@ -129,6 +147,8 @@ export function Chat({
   // Right-side sidebar slot — threads, soon other things. Cleared on channel
   // change so a thread from the previous channel doesn't linger.
   const sidebar = useRightSidebar()
+  // Modal slot — workspace members list, future confirm dialogs, etc.
+  const modal = useModal()
 
   // Global hotkey: Cmd+/ on Mac, Ctrl+/ on others, toggles the left nav.
   // Bound on window so it works anywhere in the chat — including while
@@ -161,6 +181,7 @@ export function Chat({
   const { data: members } = useMembers(slug)
   const { data: dms } = useDMs(slug)
   const { data: unread } = useUnreadCounts(slug)
+  const { data: mentionCounts } = useWorkspaceMentionCounts(slug)
   const markRead = useMarkChannelRead(slug)
 
   // Tell the realtime patcher who we are + which channel is in view so it
@@ -265,6 +286,70 @@ export function Chat({
   const isWorkspaceAdmin =
     myMembership?.role === 'owner' || myMembership?.role === 'admin'
 
+  // openUserInfo populates the right sidebar with a UserInfoView for the
+  // given user. Defined here so all triggers (message author clicks, DM list
+  // avatar clicks, members-modal rows) go through one path with consistent
+  // close + DM-start behavior.
+  function openUserInfo(userId: string) {
+    if (!slug) return
+    sidebar.open({
+      id: `user:${userId}`,
+      title: 'User info',
+      body: (
+        <UserInfoView
+          userId={userId}
+          workspaceSlug={slug}
+          currentUserID={user.id}
+          onStartDM={(channelId) => {
+            sidebar.close()
+            handleSelectChannel(channelId)
+          }}
+        />
+      ),
+    })
+  }
+
+  // openMentionsPanel populates the right sidebar with the recent-mentions
+  // feed (bell-icon click). Lives at the Chat-shell level so it can route
+  // jumps via handleSelectChannel — same path search results use.
+  function openMentionsPanel() {
+    sidebar.open({
+      id: 'mentions',
+      title: 'Recent mentions',
+      body: (
+        <MentionsListView
+          workspaceSlug={slug}
+          memberMap={
+            new Map((members ?? []).map((m) => [m.user_id, m]))
+          }
+          onJump={(channelId, messageId) =>
+            handleSelectChannel(channelId, messageId)
+          }
+        />
+      ),
+    })
+  }
+
+  // openMembersModal pops the searchable member list. Picking a member
+  // closes the modal and routes through openUserInfo so the sidebar shows
+  // the same profile shape every time.
+  function openMembersModal() {
+    modal.open({
+      id: 'members',
+      title: 'Workspace members',
+      size: 'md',
+      body: (
+        <MembersModalBody
+          members={members ?? []}
+          onPick={(userId) => {
+            modal.close()
+            openUserInfo(userId)
+          }}
+        />
+      ),
+    })
+  }
+
   function handleSelectWorkspace(nextSlug: string) {
     if (onSelectWorkspace) onSelectWorkspace(nextSlug)
     else {
@@ -285,17 +370,24 @@ export function Chat({
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100">
-      <header className="flex h-11 shrink-0 items-center justify-center border-b border-zinc-800 bg-zinc-900/60 px-4">
-        <SearchBar
-          workspaceSlug={slug}
-          channels={channels ?? []}
-          dms={dms ?? []}
-          pendingDMs={pendingDMs}
-          onJump={(channelId) => handleSelectChannel(channelId)}
-          onJumpToMessage={(channelId, messageId) =>
-            handleSelectChannel(channelId, messageId)
-          }
+      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-900/60 px-4">
+        <div className="flex-1 flex justify-center">
+          <SearchBar
+            workspaceSlug={slug}
+            channels={channels ?? []}
+            dms={dms ?? []}
+            pendingDMs={pendingDMs}
+            onJump={(channelId) => handleSelectChannel(channelId)}
+            onJumpToMessage={(channelId, messageId) =>
+              handleSelectChannel(channelId, messageId)
+            }
+          />
+        </div>
+        <BellButton
+          totalUnread={mentionCounts?.total ?? 0}
+          onClick={openMentionsPanel}
         />
+        <MembersAvatarStack members={members} onClick={openMembersModal} />
       </header>
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {!leftNavOpen && (
@@ -357,6 +449,7 @@ export function Chat({
             onSelect={handleSelectChannel}
             workspaceSlug={slug}
             unread={unread}
+            mentionCounts={mentionCounts?.by_channel}
           />
           <DirectList
             workspaceSlug={slug}
@@ -370,10 +463,9 @@ export function Chat({
               setPendingDMs((cur) => cur.filter((d) => d.id !== id))
             }
             unread={unread}
+            onUserClick={openUserInfo}
           />
         </nav>
-
-        <MemberList members={members} />
 
         <footer className="border-t border-zinc-800 px-4 py-3 text-sm">
           {onOpenDashboard && (
@@ -447,10 +539,35 @@ export function Chat({
                       new Map((members ?? []).map((m) => [m.user_id, m]))
                     }
                     currentUserID={user.id}
+                    onUserClick={openUserInfo}
                   />
                 ),
               })
             }}
+            onOpenPins={() => {
+              if (!activeChannel) return
+              const channelName =
+                activeChannel.slug ?? activeChannel.name ?? 'channel'
+              const isDM =
+                activeChannel.kind === 'dm' || activeChannel.kind === 'group_dm'
+              sidebar.open({
+                id: `pins:${activeChannel.id}`,
+                title: isDM ? 'Pinned' : `Pinned in #${channelName}`,
+                body: (
+                  <PinnedListView
+                    channelId={activeChannel.id}
+                    memberMap={
+                      new Map((members ?? []).map((m) => [m.user_id, m]))
+                    }
+                    currentUserID={user.id}
+                    onJump={(messageId) =>
+                      handleSelectChannel(activeChannel.id, messageId)
+                    }
+                  />
+                ),
+              })
+            }}
+            onUserClick={openUserInfo}
           />
         ) : (
           <FullPageMessage>Select a channel to start chatting.</FullPageMessage>
@@ -466,6 +583,433 @@ export function Chat({
       {showSettings && (
         <UserSettingsModal user={user} onClose={() => setShowSettings(false)} />
       )}
+    </div>
+  )
+}
+
+// UserInfoView — body for the right sidebar when a user name/avatar is
+// clicked. Pulls the member from the workspace members cache, falls back to
+// a "user not found in this workspace" line. Offers a "Send DM" action that
+// uses useStartDM, then signals the caller to close the sidebar and select
+// the new channel.
+function UserInfoView({
+  userId,
+  workspaceSlug,
+  currentUserID,
+  onStartDM,
+}: {
+  userId: string
+  workspaceSlug: string
+  currentUserID: string
+  // Fired with the channel id once the DM is created. The caller decides
+  // what to do (typically: close the sidebar + navigate to the channel).
+  onStartDM: (channelId: string) => void
+}) {
+  const { data: members } = useMembers(workspaceSlug)
+  const member = (members ?? []).find((m) => m.user_id === userId)
+  const startDM = useStartDM(workspaceSlug)
+  const isSelf = userId === currentUserID
+
+  function handleStartDM() {
+    if (isSelf || !member) return
+    startDM.mutate(userId, { onSuccess: (channel) => onStartDM(channel.id) })
+  }
+
+  if (!member) {
+    return (
+      <div className="p-5 text-sm text-zinc-400">
+        That user isn't a member of this workspace anymore.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4 p-5">
+      <div className="flex flex-col items-center gap-3">
+        <Avatar src={member.avatar_url} name={member.display_name} size={96} />
+        <div className="text-center">
+          <div className="text-lg font-semibold">{member.display_name}</div>
+          <div className="text-xs uppercase tracking-wide text-zinc-500">
+            {member.role}
+          </div>
+        </div>
+      </div>
+
+      <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+        <dt className="text-xs uppercase tracking-wide text-zinc-500">Email</dt>
+        <dd className="truncate">{member.email}</dd>
+        {member.joined_at && (
+          <>
+            <dt className="text-xs uppercase tracking-wide text-zinc-500">Joined</dt>
+            <dd>{new Date(member.joined_at).toLocaleDateString()}</dd>
+          </>
+        )}
+      </dl>
+
+      {!isSelf && (
+        <button
+          type="button"
+          onClick={handleStartDM}
+          disabled={startDM.isPending}
+          className="rounded bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {startDM.isPending ? 'Opening…' : `Send ${member.display_name} a DM`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// BellButton — header-level shortcut to the recent-mentions panel. Renders
+// a numeric badge when the user has unread mentions across the workspace.
+function BellButton({
+  totalUnread,
+  onClick,
+}: {
+  totalUnread: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={
+        totalUnread > 0
+          ? `${totalUnread} unread mention${totalUnread === 1 ? '' : 's'}`
+          : 'Mentions'
+      }
+      className="relative flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+    >
+      <Bell className="h-4 w-4" />
+      {totalUnread > 0 && (
+        <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-amber-500 px-1 text-[10px] font-bold leading-4 text-zinc-950">
+          {totalUnread > 99 ? '99+' : totalUnread}
+        </span>
+      )}
+    </button>
+  )
+}
+
+// MentionsListView — body for the RightSidebar slot when the bell icon is
+// clicked. Renders newest-first unread mentions; each row jumps to the
+// mentioning message. A "Mark all read" affordance clears the workspace
+// without leaving the panel.
+function MentionsListView({
+  workspaceSlug,
+  memberMap,
+  onJump,
+}: {
+  workspaceSlug: string | null
+  memberMap: Map<string, Member>
+  onJump: (channelId: string, messageId: string) => void
+}) {
+  const { data, isLoading, error } = useMyMentions({ unread: true, limit: 50 })
+  const markRead = useMarkMentionsRead()
+
+  if (isLoading) {
+    return <div className="p-5 text-sm text-zinc-500">Loading…</div>
+  }
+  if (error) {
+    return (
+      <div className="p-5 text-sm text-rose-400">
+        Couldn't load mentions.
+      </div>
+    )
+  }
+  const mentions: MentionNotification[] = data?.mentions ?? []
+  if (mentions.length === 0) {
+    return (
+      <div className="p-5 text-sm text-zinc-500">
+        No unread mentions. Anyone who @-mentions you, or sends @channel /
+        @everyone in a channel you're in, will show up here.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
+        <span className="text-xs text-zinc-500">
+          {mentions.length} unread
+        </span>
+        {workspaceSlug && (
+          <button
+            type="button"
+            onClick={() => {
+              // workspaceSlug is the URL-friendly name; the mutation needs
+              // the workspace id. We grab it from the first mention since
+              // they're all in this workspace (the count endpoint scoped
+              // them already).
+              const wid = mentions[0]?.workspace_id
+              if (wid) markRead.mutate({ workspaceId: wid })
+            }}
+            className="text-xs text-zinc-400 hover:text-zinc-100"
+          >
+            Mark all read
+          </button>
+        )}
+      </div>
+      <ul className="divide-y divide-zinc-800">
+        {mentions.map((mn) => {
+          const mentioner = mn.mentioner_user_id
+            ? memberMap.get(mn.mentioner_user_id)
+            : undefined
+          const mentionerName =
+            mentioner?.display_name ??
+            (mn.mentioner_user_id?.slice(0, 8) ?? '(unknown user)')
+          const kindLabel =
+            mn.mention_kind === 'user'
+              ? 'mentioned you'
+              : `posted @${mn.mention_kind}`
+          return (
+            <li key={mn.id} className="group relative px-4 py-3 hover:bg-zinc-900/60">
+              <button
+                type="button"
+                onClick={() => {
+                  onJump(mn.channel_id, mn.message_id)
+                  markRead.mutate({ id: mn.id })
+                }}
+                className="block w-full text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Avatar
+                    src={mentioner?.avatar_url}
+                    name={mentionerName}
+                    size={20}
+                  />
+                  <span className="text-xs">
+                    <span className="font-semibold text-zinc-200">
+                      {mentionerName}
+                    </span>{' '}
+                    <span className="text-zinc-400">{kindLabel}</span>
+                  </span>
+                  <span className="ml-auto text-[11px] text-zinc-500">
+                    {timeAgo(mn.created_at)}
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => markRead.mutate({ id: mn.id })}
+                title="Mark read"
+                className="absolute right-3 top-3 hidden h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 group-hover:flex"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+// PinnedListView — body for the RightSidebar slot when the Pin icon is
+// clicked. Renders a flat list of pinned messages in the channel, newest-
+// pinned first. Each row is clickable and jumps to the message inline (via
+// the same anchor-scroll mechanism search results use).
+function PinnedListView({
+  channelId,
+  memberMap,
+  currentUserID,
+  onJump,
+}: {
+  channelId: string
+  memberMap: Map<string, Member>
+  currentUserID: string
+  onJump: (messageId: string) => void
+}) {
+  const { data, isLoading, error } = useChannelPins(channelId)
+  const unpinMut = useUnpinMessage(channelId)
+
+  if (isLoading) {
+    return <div className="p-5 text-sm text-zinc-500">Loading…</div>
+  }
+  if (error) {
+    return (
+      <div className="p-5 text-sm text-rose-400">
+        Couldn't load pinned messages.
+      </div>
+    )
+  }
+  const messages = data?.messages ?? []
+  if (messages.length === 0) {
+    return (
+      <div className="p-5 text-sm text-zinc-500">
+        Nothing pinned in this channel yet. Hit the pin icon on any message
+        — or press <kbd className="rounded bg-zinc-800 px-1">p</kbd> with a
+        message selected.
+      </div>
+    )
+  }
+
+  return (
+    <ul className="divide-y divide-zinc-800">
+      {messages.map((m) => {
+        const author = m.user_id ? memberMap.get(m.user_id) : undefined
+        const authorName = author?.display_name ?? '(unknown user)'
+        const pinnerName = m.pinned_by_user_id
+          ? memberMap.get(m.pinned_by_user_id)?.display_name ??
+            (m.pinned_by_user_id === currentUserID ? 'you' : null)
+          : null
+        return (
+          <li key={m.id} className="group relative px-4 py-3 hover:bg-zinc-900/60">
+            <button
+              type="button"
+              onClick={() => onJump(m.id)}
+              className="block w-full text-left"
+            >
+              <div className="flex items-center gap-2">
+                <Avatar src={author?.avatar_url} name={authorName} size={20} />
+                <span className="text-xs font-semibold text-zinc-200">
+                  {authorName}
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  {new Date(m.created_at).toLocaleDateString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </span>
+              </div>
+              <p className="mt-1 line-clamp-3 break-words text-sm text-zinc-300">
+                {pinSnippet(m)}
+              </p>
+              {pinnerName && (
+                <p className="mt-1 text-[11px] text-amber-400/80">
+                  Pinned by {pinnerName}
+                </p>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => unpinMut.mutate({ messageId: m.id })}
+              title="Unpin"
+              className="absolute right-3 top-3 hidden h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-amber-300 group-hover:flex"
+            >
+              <PinOff className="h-4 w-4" />
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+// pinSnippet pulls a short text preview out of a message — prefer plain text;
+// fall back to walking the TipTap payload for the first text node. Keeps the
+// pinned-list rows readable even for rich content.
+function pinSnippet(m: Message): string {
+  if (m.text && m.text.trim() !== '') return m.text
+  const payload = m.payload as { content?: unknown[] } | undefined
+  if (payload?.content) {
+    const buf: string[] = []
+    walkText(payload as { content?: unknown[] }, buf)
+    const joined = buf.join(' ').trim()
+    if (joined) return joined
+  }
+  if (m.attachments && m.attachments.length > 0) {
+    return `[${m.attachments.length} attachment${m.attachments.length === 1 ? '' : 's'}]`
+  }
+  return '(empty message)'
+}
+
+function walkText(node: { content?: unknown[]; text?: string }, out: string[]) {
+  if (typeof node.text === 'string') out.push(node.text)
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) {
+      walkText(child as { content?: unknown[]; text?: string }, out)
+    }
+  }
+}
+
+// MembersAvatarStack — header-level summary of workspace members. Renders
+// up to MAX_VISIBLE overlapping avatars, then a "+N" pill, then opens the
+// full searchable list in a modal on click.
+function MembersAvatarStack({
+  members,
+  onClick,
+}: {
+  members: Member[] | undefined
+  onClick: () => void
+}) {
+  if (!members || members.length === 0) return null
+  const MAX_VISIBLE = 3
+  const visible = members.slice(0, MAX_VISIBLE)
+  const extra = members.length - visible.length
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${members.length} workspace ${members.length === 1 ? 'member' : 'members'} — click to view all`}
+      className="flex items-center gap-2 rounded px-2 py-1 hover:bg-zinc-800"
+    >
+      <div className="flex -space-x-2">
+        {visible.map((m) => (
+          <div key={m.user_id} className="ring-2 ring-zinc-900 rounded-md">
+            <Avatar src={m.avatar_url} name={m.display_name} size={24} />
+          </div>
+        ))}
+      </div>
+      {extra > 0 && (
+        <span className="text-xs font-medium text-zinc-400">+{extra}</span>
+      )}
+    </button>
+  )
+}
+
+// MembersModalBody — full searchable workspace member list. Clicking a row
+// closes the modal (parent passes onPick) and opens the user-info sidebar.
+function MembersModalBody({
+  members,
+  onPick,
+}: {
+  members: Member[]
+  onPick: (userId: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? members.filter(
+        (m) =>
+          m.display_name.toLowerCase().includes(q) ||
+          m.email.toLowerCase().includes(q),
+      )
+    : members
+  return (
+    <div className="flex h-full flex-col min-h-0">
+      <div className="border-b border-zinc-800 p-3">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoFocus
+          placeholder="Search members"
+          className="w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm outline-none focus:border-sky-500"
+        />
+      </div>
+      <ul className="flex-1 min-h-0 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <li className="px-4 py-6 text-center text-sm text-zinc-500">
+            No matches.
+          </li>
+        ) : (
+          filtered.map((m) => (
+            <li key={m.user_id}>
+              <button
+                type="button"
+                onClick={() => onPick(m.user_id)}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm hover:bg-zinc-800"
+              >
+                <Avatar src={m.avatar_url} name={m.display_name} size={28} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{m.display_name}</div>
+                  <div className="truncate text-xs text-zinc-500">{m.email}</div>
+                </div>
+                <span className="text-xs text-zinc-600">{m.role}</span>
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
     </div>
   )
 }
@@ -754,12 +1298,17 @@ function ChannelList({
   onSelect,
   workspaceSlug,
   unread,
+  mentionCounts,
 }: {
   channels?: Channel[]
   activeId: string | null
   onSelect: (id: string) => void
   workspaceSlug: string | null
   unread?: UnreadMap
+  // Per-channel unread mention counts. Keyed by channel id. A channel with
+  // both unread messages and unread mentions shows both badges (mention
+  // badge wins visual prominence — amber on rose).
+  mentionCounts?: Record<string, number>
 }) {
   const [showCreate, setShowCreate] = useState(false)
   const [showBrowse, setShowBrowse] = useState(false)
@@ -800,6 +1349,7 @@ function ChannelList({
             // activation, but the count cache may not have caught up yet.
             const unreadCount = active ? 0 : unread?.[c.id] ?? 0
             const hasUnread = unreadCount > 0
+            const mentionCount = active ? 0 : mentionCounts?.[c.id] ?? 0
             return (
               <li key={c.id}>
                 <button
@@ -817,6 +1367,14 @@ function ChannelList({
                   <span className="flex-1 truncate">{c.slug ?? '(dm)'}</span>
                   {c.archived && (
                     <span className="text-xs text-zinc-600">archived</span>
+                  )}
+                  {mentionCount > 0 && (
+                    <span
+                      title={`${mentionCount} unread mention${mentionCount === 1 ? '' : 's'}`}
+                      className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-zinc-950"
+                    >
+                      @{mentionCount > 99 ? '99+' : mentionCount}
+                    </span>
                   )}
                   {hasUnread && (
                     <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
@@ -997,6 +1555,7 @@ function DirectList({
   onAddPendingDM,
   onRemovePendingDM,
   unread,
+  onUserClick,
 }: {
   workspaceSlug: string | null
   members: Member[] | undefined
@@ -1007,6 +1566,9 @@ function DirectList({
   onAddPendingDM: (d: DMSummary) => void
   onRemovePendingDM: (id: string) => void
   unread?: UnreadMap
+  // For 1:1 DMs, clicking the peer avatar opens the user-info sidebar
+  // instead of selecting the channel. Group DMs ignore it.
+  onUserClick?: (userId: string) => void
 }) {
   const { data: dms, isLoading } = useDMs(workspaceSlug)
   const startDM = useStartDM(workspaceSlug)
@@ -1084,7 +1646,7 @@ function DirectList({
                 <button
                   onClick={() => onSelect(d.id)}
                   className={
-                    'flex flex-1 items-center gap-2 px-4 py-1 text-left text-sm transition-colors ' +
+                    'flex flex-1 items-center gap-2 pr-4 py-1 text-left text-sm transition-colors ' +
                     (active
                       ? 'bg-zinc-800 text-zinc-100'
                       : hasUnread
@@ -1093,12 +1655,38 @@ function DirectList({
                   }
                   title={d.other_emails.join(', ')}
                 >
-                  <Avatar
-                    src={peer?.avatar_url}
-                    name={label}
-                    size={20}
-                    className="shrink-0"
-                  />
+                  {peer && onUserClick ? (
+                    // 1:1 DM with a known peer — clicking the avatar opens
+                    // user info. Pull it out of the outer button (HTML
+                    // forbids nested buttons) and into a sibling that
+                    // stopPropagation's so it doesn't also select the DM.
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onUserClick(peer.user_id)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onUserClick(peer.user_id)
+                        }
+                      }}
+                      title={`Open ${label}'s user info`}
+                      className="ml-4 shrink-0 cursor-pointer rounded-md hover:opacity-80"
+                    >
+                      <Avatar src={peer.avatar_url} name={label} size={20} />
+                    </span>
+                  ) : (
+                    <Avatar
+                      src={peer?.avatar_url}
+                      name={label}
+                      size={20}
+                      className="ml-4 shrink-0"
+                    />
+                  )}
                   <span className="flex-1 truncate">{label}</span>
                   {hasUnread && (
                     <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
@@ -1745,28 +2333,6 @@ function InviteRow({
   )
 }
 
-function MemberList({ members }: { members?: Member[] }) {
-  if (!members || members.length === 0) return null
-  return (
-    <div className="border-t border-zinc-800 max-h-48 overflow-y-auto py-2">
-      <h2 className="px-4 pt-2 pb-1 text-xs uppercase tracking-wider text-zinc-500">
-        Workspace members
-      </h2>
-      <ul>
-        {members.map((m) => (
-          <li
-            key={m.user_id}
-            className="flex items-center gap-2 px-4 py-1 text-sm text-zinc-400"
-          >
-            <Avatar src={m.avatar_url} name={m.display_name} size={20} />
-            <span className="truncate">{m.display_name}</span>
-            <span className="ml-auto text-xs text-zinc-600">{m.role}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
 
 function ChannelView({
   channel,
@@ -1779,6 +2345,8 @@ function ChannelView({
   isWorkspaceAdmin,
   onChannelGone,
   onOpenThread,
+  onOpenPins,
+  onUserClick,
 }: {
   channel: Channel
   workspaceSlug: string
@@ -1790,27 +2358,41 @@ function ChannelView({
   isWorkspaceAdmin: boolean
   onChannelGone: () => void
   onOpenThread: (rootId: string) => void
+  onOpenPins: () => void
+  onUserClick: (userId: string) => void
 }) {
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
   const isDM = channel.kind === 'dm' || channel.kind === 'group_dm'
   const typingUserIDs = useTypingState(channel.id, currentUserID)
   return (
     <>
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <div>
-          <h1 className="text-lg font-semibold">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold leading-tight truncate">
             <span className="text-zinc-500">{isDM ? '@ ' : '# '}</span>
             {channel.slug ?? channel.name ?? '(dm)'}
           </h1>
-          {channel.topic && <p className="text-xs text-zinc-400">{channel.topic}</p>}
+          {channel.topic && (
+            <p className="text-xs text-zinc-400 leading-tight truncate">{channel.topic}</p>
+          )}
         </div>
-        {!isDM && isWorkspaceAdmin && (
-          <ChannelSettingsMenu
-            channel={channel}
-            workspaceSlug={workspaceSlug}
-            onGone={onChannelGone}
-          />
-        )}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onOpenPins}
+            title="Pinned messages"
+            className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            <Pin className="h-4 w-4" />
+          </button>
+          {!isDM && isWorkspaceAdmin && (
+            <ChannelSettingsMenu
+              channel={channel}
+              workspaceSlug={workspaceSlug}
+              onGone={onChannelGone}
+            />
+          )}
+        </div>
       </header>
 
       <MessageList
@@ -1821,12 +2403,14 @@ function ChannelView({
         scrollTargetMessageId={scrollTargetMessageId}
         onScrollHandled={onScrollHandled}
         onOpenThread={onOpenThread}
+        onUserClick={onUserClick}
       />
       <TypingIndicator userIDs={typingUserIDs} memberMap={memberMap} />
       <Composer
         channelId={channel.id}
         workspaceSlug={workspaceSlug}
         archived={channel.archived}
+        currentUserID={currentUserID}
       />
     </>
   )
@@ -1947,6 +2531,7 @@ function MessageList({
   scrollTargetMessageId,
   onScrollHandled,
   onOpenThread,
+  onUserClick,
 }: {
   channelId: string
   memberMap: Map<string, Member>
@@ -1955,6 +2540,7 @@ function MessageList({
   scrollTargetMessageId: string | null
   onScrollHandled: () => void
   onOpenThread: (rootId: string) => void
+  onUserClick: (userId: string) => void
 }) {
   const {
     data,
@@ -2067,6 +2653,28 @@ function MessageList({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, myLatestMessageId])
+
+  // 'p' hotkey — toggle pin on the selected message. Same gating as 'e':
+  // skipped when the user is typing in an editor or any modifier is held.
+  // Pin permissions are channel-wide (any member can pin any message), so
+  // unlike 'e' this fires regardless of authorship.
+  const [pinRequestTick, setPinRequestTick] = useState(0)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'p' && e.key !== 'P') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (!selectedId) return
+      const active = document.activeElement as HTMLElement | null
+      if (active) {
+        if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') return
+        if (active.isContentEditable) return
+      }
+      e.preventDefault()
+      setPinRequestTick((t) => t + 1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedId])
 
   // ── scroll anchoring ─────────────────────────────────────────────────────
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -2203,13 +2811,16 @@ function MessageList({
               <MessageItem
                 m={m}
                 member={m.user_id ? memberMap.get(m.user_id) : undefined}
+                memberMap={memberMap}
                 currentUserID={currentUserID}
                 channelId={channelId}
                 highlighted={m.id === highlightId}
                 selected={m.id === selectedId}
                 isMyLatest={m.id === myLatestMessageId}
                 onOpenThread={onOpenThread}
+                onUserClick={onUserClick}
                 editRequestTick={m.id === selectedId ? editRequestTick : 0}
+                pinRequestTick={m.id === selectedId ? pinRequestTick : 0}
               />
             </Fragment>
           )
@@ -2296,16 +2907,23 @@ const QUICK_REACTIONS = ['👍', '❤️', '🎉', '😄', '😮', '😢', '🙏
 function MessageItem({
   m,
   member,
+  memberMap,
   currentUserID,
   channelId,
   highlighted = false,
   selected = false,
   isMyLatest = false,
   onOpenThread,
+  onUserClick,
   editRequestTick = 0,
+  pinRequestTick = 0,
 }: {
   m: Message
   member?: Member
+  // Lookup of all channel members so the "pinned by {name}" badge can
+  // resolve the pinner's display name. Optional — falls back to a short id
+  // when absent.
+  memberMap?: Map<string, Member>
   currentUserID: string
   channelId: string
   // Transient flash after a search-jump or anchor scroll.
@@ -2314,10 +2932,16 @@ function MessageItem({
   selected?: boolean
   isMyLatest?: boolean
   onOpenThread?: (rootId: string) => void
+  // Fires when the avatar or author name is clicked. Parent opens the user
+  // info panel in the right sidebar.
+  onUserClick?: (userId: string) => void
   // Counter from MessageList — bumps every time the user presses 'e' on the
   // selected message. We enter edit mode whenever it ticks up. Zero means no
   // pending request.
   editRequestTick?: number
+  // Counter from MessageList — bumps when the user presses 'p' on the
+  // selected message. We toggle pin state whenever it ticks up.
+  pinRequestTick?: number
 }) {
   const author = member?.display_name ?? '(unknown user)'
   // Slack-style "10:04 AM" — drop seconds.
@@ -2331,6 +2955,8 @@ function MessageItem({
   const editMut = useEditMessage(channelId)
   const delMut = useDeleteMessage(channelId)
   const reactMut = useToggleReaction(channelId, currentUserID)
+  const pinMut = usePinMessage(channelId)
+  const unpinMut = useUnpinMessage(channelId)
 
   // Honor 'e' hotkey requests from MessageList. The parent gates on
   // ownership + isMyLatest already, but we also require the tick to be
@@ -2345,6 +2971,19 @@ function MessageItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequestTick])
 
+  // Honor 'p' hotkey requests — toggle pin. We read `m.pinned` at tick time
+  // so the toggle reflects the current state even if the user pressed 'p'
+  // shortly after another client flipped it.
+  useEffect(() => {
+    if (pinRequestTick === 0) return
+    if (m.pinned) {
+      unpinMut.mutate({ messageId: m.id })
+    } else {
+      pinMut.mutate({ messageId: m.id, pinnedByUserId: currentUserID })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinRequestTick])
+
   function handleDelete() {
     if (!confirm('Delete this message?')) return
     delMut.mutate(m.id)
@@ -2358,6 +2997,13 @@ function MessageItem({
     setPickerOpen(false)
   }
 
+  // "Mentions me" check — true when the message has a mention notification
+  // targeting the current user, *or* a channel-wide kind (which fans out
+  // to me too). The visual cue is a left edge accent, applied only when
+  // not already highlighted/selected so we don't stack rings.
+  const mentionsMe = (m.mentions ?? []).some((mn) =>
+    mn.kind === 'user' ? mn.user_id === currentUserID : true,
+  )
   return (
     <li
       data-message-id={m.id}
@@ -2367,18 +3013,42 @@ function MessageItem({
           ? 'bg-amber-500/10 ring-1 ring-amber-500/40'
           : selected
             ? 'bg-sky-500/10 ring-1 ring-sky-500/40'
-            : '')
+            : mentionsMe
+              ? 'bg-amber-500/[0.04] border-l-2 border-amber-500/60 pl-1.5'
+              : '')
       }
     >
-      <Avatar
-        src={member?.avatar_url}
-        name={author}
-        size={36}
-        className="mt-0.5 shrink-0"
-      />
+      {onUserClick && m.user_id ? (
+        <button
+          type="button"
+          onClick={() => onUserClick(m.user_id!)}
+          title={`Open user info — ${author}`}
+          className="flex start mt-0.5 shrink-0 rounded-md hover:opacity-80"
+        >
+          <Avatar src={member?.avatar_url} name={author} size={36} />
+        </button>
+      ) : (
+        <Avatar
+          src={member?.avatar_url}
+          name={author}
+          size={36}
+          className="mt-0.5 shrink-0"
+        />
+      )}
       <div className="min-w-0 flex-1">
       <div className="flex items-baseline gap-2">
-        <span className="font-bold text-zinc-100">{author}</span>
+        {onUserClick && m.user_id ? (
+          <button
+            type="button"
+            onClick={() => onUserClick(m.user_id!)}
+            title={`Open user info — ${author}`}
+            className="font-bold text-zinc-100 hover:underline"
+          >
+            {author}
+          </button>
+        ) : (
+          <span className="font-bold text-zinc-100">{author}</span>
+        )}
         <span className="text-xs text-zinc-500">{ts}</span>
         {m.edited_at && <span className="text-xs text-zinc-600">(edited)</span>}
       </div>
@@ -2443,6 +3113,28 @@ function MessageItem({
         </ul>
       )}
 
+      {/* Pinned badge — small "Pinned by Alice" line under the body. The
+          channel header's Pin icon opens the full Pinned panel. */}
+      {m.pinned && (
+        <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-400/80">
+          <Pin className="h-3 w-3" />
+          <span>
+            Pinned
+            {m.pinned_by_user_id && (
+              <>
+                {' by '}
+                <span className="font-medium">
+                  {memberMap?.get(m.pinned_by_user_id)?.display_name ??
+                    (m.pinned_by_user_id === currentUserID
+                      ? 'you'
+                      : m.pinned_by_user_id.slice(0, 8))}
+                </span>
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
       {/* Thread reply summary — only on root messages with replies. */}
       {!m.thread_root_id && (m.reply_count ?? 0) > 0 && onOpenThread && (
         <button
@@ -2489,6 +3181,25 @@ function MessageItem({
               <MessageSquare className="h-4 w-4" />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              if (m.pinned) {
+                unpinMut.mutate({ messageId: m.id })
+              } else {
+                pinMut.mutate({ messageId: m.id, pinnedByUserId: currentUserID })
+              }
+            }}
+            title={m.pinned ? 'Unpin from channel (p)' : 'Pin to channel (p)'}
+            className={
+              'flex h-7 w-7 items-center justify-center hover:bg-zinc-800 ' +
+              (m.pinned
+                ? 'text-amber-400 hover:text-amber-300'
+                : 'text-zinc-400 hover:text-zinc-100')
+            }
+          >
+            {m.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+          </button>
           {isOwn && (
             <>
               {isMyLatest && (
@@ -2527,6 +3238,7 @@ function ThreadView({
   workspaceSlug,
   memberMap,
   currentUserID,
+  onUserClick,
 }: {
   rootId: string
   channelId: string
@@ -2535,6 +3247,7 @@ function ThreadView({
   workspaceSlug: string
   memberMap: Map<string, Member>
   currentUserID: string
+  onUserClick?: (userId: string) => void
 }) {
   const { data, isLoading, error } = useThreadReplies(rootId)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -2576,6 +3289,7 @@ function ThreadView({
                 member={parent.user_id ? memberMap.get(parent.user_id) : undefined}
                 currentUserID={currentUserID}
                 channelId={channelId}
+                onUserClick={onUserClick}
               />
             </ul>
           </div>
@@ -2607,6 +3321,7 @@ function ThreadView({
                 member={r.user_id ? memberMap.get(r.user_id) : undefined}
                 currentUserID={currentUserID}
                 channelId={channelId}
+                onUserClick={onUserClick}
               />
             ))}
           </ul>
@@ -2617,6 +3332,7 @@ function ThreadView({
         channelId={channelId}
         workspaceSlug={workspaceSlug}
         archived={false}
+        currentUserID={currentUserID}
         mode="thread"
         threadRootId={rootId}
       />
@@ -2801,16 +3517,28 @@ type PendingAttachment = {
 const MAX_FILE_BYTES = 25 * 1024 * 1024
 const MAX_PER_MESSAGE = 10
 
+// MentionCandidate is one row in the @-typeahead dropdown. Users are real
+// members; specials are @channel / @here / @everyone, rendered as virtual
+// rows below the user list. Unified type makes the picker uniform.
+type MentionCandidate =
+  | { kind: 'user'; userId: string; displayName: string; member: Member }
+  | { kind: MentionKind; userId?: never; displayName: string; member?: never }
+
 function Composer({
   channelId,
   workspaceSlug,
   archived,
+  currentUserID,
   mode = 'channel',
   threadRootId,
 }: {
   channelId: string
   workspaceSlug: string
   archived: boolean
+  // Needed so a slash-command handler can identify the invoker. Could be
+  // derived from useMe() in-place, but threading it makes the dependency
+  // explicit and saves a render.
+  currentUserID: string
   // 'channel' posts to the channel timeline (default).
   // 'thread' posts as a reply to `threadRootId`. Typing indicators are
   // suppressed in thread mode (threads don't surface them).
@@ -2820,6 +3548,30 @@ function Composer({
   const [pending, setPending] = useState<PendingAttachment[]>([])
   const [dragActive, setDragActive] = useState(false)
   const [hasContent, setHasContent] = useState(false)
+  // Slash typeahead state — driven by the current editor text. When the
+  // user types `/` as the first non-whitespace character, we show matching
+  // commands; selecting one expands it back into the editor.
+  const [slashMatches, setSlashMatches] = useState<SlashCommand[]>([])
+  const [slashHighlight, setSlashHighlight] = useState(0)
+  const [slashQuery, setSlashQuery] = useState<string | null>(null)
+  // Tracks whether the most recent submit was a slash command we already
+  // ran — used to suppress the trailing "Couldn't post: ..." toast that
+  // would otherwise fire if the handler returned a no-op (null) result.
+  const slashHandlingRef = useRef(false)
+  // Mention typeahead state. `mentionQuery` is the partial after the `@`
+  // (e.g. "bo" for "@bo"); null means the dropdown is hidden. `mentionFrom`
+  // / `mentionTo` mark the position range in the editor doc that should be
+  // replaced when the user picks a candidate.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionFrom, setMentionFrom] = useState(0)
+  const [mentionTo, setMentionTo] = useState(0)
+  const [mentionHighlight, setMentionHighlight] = useState(0)
+  // Giphy pre-send picker. When set, the composer is in preview mode: the
+  // user is choosing a gif (Next / Send / Cancel) instead of typing. We
+  // gate the normal send path so Enter in the editor doesn't fire while
+  // the picker is up.
+  const [giphyPicker, setGiphyPicker] = useState<{ query: string } | null>(null)
+  const { data: members } = useMembers(workspaceSlug)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Both mutations are always declared so React hook order stays stable; only
   // the one matching `mode` is invoked by send().
@@ -2846,6 +3598,54 @@ function Composer({
       setHasContent(!empty)
       if (!empty) typing.notify()
       else typing.stop()
+      // Slash-command typeahead. Show matches while the user is still on
+      // the command name (`/gi` → giphy, gif, ...). Once whitespace follows
+      // the name we assume they're typing args and dismiss the dropdown.
+      const text = e.getText()
+      const trimmedStart = text.trimStart()
+      if (trimmedStart.startsWith('/') && !trimmedStart.slice(1).includes(' ')) {
+        const partial = trimmedStart.slice(1).toLowerCase()
+        const all = listSlashCommands()
+        const matches = partial
+          ? all.filter((c) => c.name.startsWith(partial))
+          : all
+        setSlashQuery(partial)
+        setSlashMatches(matches)
+        setSlashHighlight(0)
+      } else if (slashQuery !== null) {
+        setSlashQuery(null)
+        setSlashMatches([])
+      }
+      // @-mention typeahead. We look backward from the cursor for the
+      // nearest `@`; if it's preceded by whitespace (or start-of-doc) and
+      // has no whitespace between it and the cursor, that's a live
+      // @-token. Detection runs over plain text — TipTap mark detection
+      // would also catch *resolved* mentions, but we only want to show
+      // the dropdown while the user is still typing the partial.
+      const { from } = e.state.selection
+      const before = e.state.doc.textBetween(0, from, '\n', '\n')
+      const atIdx = before.lastIndexOf('@')
+      let inMention = false
+      if (atIdx !== -1) {
+        const between = before.slice(atIdx + 1)
+        const prevCh = atIdx === 0 ? '' : before[atIdx - 1]
+        const validStart = atIdx === 0 || /\s/.test(prevCh ?? '')
+        if (validStart && !/\s/.test(between)) {
+          // ProseMirror positions are 1-based for the doc start. textBetween
+          // counts characters with newlines collapsed; for replace we need
+          // the doc position of the `@`, which equals atIdx + 1 (skip the
+          // leading doc node) on a single-paragraph message. Hard-breaks
+          // would skew this — accepted limitation for v1.
+          setMentionQuery(between)
+          setMentionFrom(atIdx + 1)
+          setMentionTo(from)
+          setMentionHighlight(0)
+          inMention = true
+        }
+      }
+      if (!inMention && mentionQuery !== null) {
+        setMentionQuery(null)
+      }
     },
     onSubmit() {
       sendRef.current()
@@ -2924,7 +3724,21 @@ function Composer({
     })
   }
 
-  function send() {
+  function resetAfterSend() {
+    const e = editorRef.current
+    e?.commands.clearContent()
+    setHasContent(false)
+    setSlashQuery(null)
+    setSlashMatches([])
+    setMentionQuery(null)
+    setGiphyPicker(null)
+    pending.forEach((p) => {
+      if (p.previewURL) URL.revokeObjectURL(p.previewURL)
+    })
+    setPending([])
+  }
+
+  async function send() {
     const e = editorRef.current
     const trimmed = e ? e.getText().trim() : ''
     const json = e ? e.getJSON() : undefined
@@ -2932,9 +3746,87 @@ function Composer({
     const ready = pending.filter((p) => p.status === 'ready' && p.finalized)
     const stillUploading = pending.some((p) => p.status === 'uploading' || p.status === 'queued')
     if (stillUploading) return
+
+    // Slash-command interception. Look up the handler from the plain-text
+    // form (formatting marks would survive in the JSON; the canonical input
+    // is the user-visible text). When a handler matches we run it and feed
+    // its returned message body into the same post.mutate path that hand-
+    // typed messages use — so plugins ride the same validation, optimistic
+    // update, and realtime echo as user posts. Unknown commands fall through
+    // and post as raw text (more useful than a silent "command not found").
+    const slash = parseSlashInput(trimmed)
+    if (slash) {
+      // Giphy gets a Composer-internal hard-code: open the pre-send picker
+      // instead of running the registered handler. The slash command is
+      // still registered (for typeahead discovery) but its run() never
+      // fires from this path. Empty query → silently bail; nothing to
+      // search for.
+      if (slash.name === 'giphy') {
+        if (!slash.args) return
+        setGiphyPicker({ query: slash.args })
+        return
+      }
+      const cmd = getSlashCommand(slash.name)
+      if (cmd) {
+        if (slashHandlingRef.current) return
+        slashHandlingRef.current = true
+        try {
+          const ctx: SlashCommandContext = {
+            channelId,
+            workspaceSlug,
+            currentUserID,
+            isThread: mode === 'thread',
+          }
+          const result = await cmd.run(slash.args, ctx)
+          if (!result) {
+            resetAfterSend()
+            return
+          }
+          const text = (result.text ?? '').trim()
+          const fileIDsFromPlugin = result.file_ids ?? []
+          const allFileIDs = [
+            ...ready.map((p) => p.finalized!.id),
+            ...fileIDsFromPlugin,
+          ]
+          if (!text && !result.payload && allFileIDs.length === 0) {
+            resetAfterSend()
+            return
+          }
+          typing.stop()
+          // Slash-command results can carry their own structural mentions
+          // (eg. a future /announce plugin). Extract from the returned
+          // payload so plugins don't have to manually thread the mentions
+          // array through their result type.
+          const pluginMentions = result.payload
+            ? extractMentionsFromDoc(result.payload as Parameters<typeof extractMentionsFromDoc>[0])
+            : []
+          post.mutate(
+            {
+              text,
+              payload: result.payload,
+              file_ids: allFileIDs.length > 0 ? allFileIDs : undefined,
+              mentions: pluginMentions.length > 0 ? pluginMentions : undefined,
+            },
+            { onSuccess: () => resetAfterSend() },
+          )
+        } catch (err) {
+          console.error(`slash command /${cmd.name} failed:`, err)
+        } finally {
+          slashHandlingRef.current = false
+        }
+        return
+      }
+    }
+
     if (!trimmed && ready.length === 0) return
     const fileIDs = ready.map((p) => p.finalized!.id)
     typing.stop()
+    // Extract structural mentions from the TipTap doc — these come from
+    // the mention marks the @-typeahead inserted. Literal "@bob" text
+    // typed without picking from the dropdown carries no mark and so
+    // produces no notification (matches Slack's "you have to actually
+    // select the mention" UX).
+    const mentions = extractMentionsFromDoc(json)
     post.mutate(
       {
         text: trimmed,
@@ -2942,21 +3834,14 @@ function Composer({
         // A bare paragraph round-trips fine via plain text alone.
         payload: !richEmpty ? json : undefined,
         file_ids: fileIDs.length > 0 ? fileIDs : undefined,
+        mentions: mentions.length > 0 ? mentions : undefined,
       },
-      {
-        onSuccess: () => {
-          e?.commands.clearContent()
-          setHasContent(false)
-          // Clean up previews.
-          pending.forEach((p) => {
-            if (p.previewURL) URL.revokeObjectURL(p.previewURL)
-          })
-          setPending([])
-        },
-      },
+      { onSuccess: () => resetAfterSend() },
     )
   }
-  sendRef.current = send
+  sendRef.current = () => {
+    void send()
+  }
 
   // Drag-drop on the composer card.
   function onDragOver(e: React.DragEvent) {
@@ -3028,6 +3913,78 @@ function Composer({
   const isActive = (mark: string, attrs?: Record<string, unknown>) =>
     !!editor?.isActive(mark, attrs)
 
+  function pickSlash(name: string) {
+    const e = editorRef.current
+    if (!e) return
+    // Wipe whatever the user has typed and prefill `/<name> ` so the editor
+    // sits at the args position. Keeps the typing → Enter flow consistent
+    // regardless of whether the user clicked or typed the full name.
+    e.commands.clearContent()
+    e.commands.insertContent(`/${name} `)
+    e.commands.focus()
+    setSlashQuery(null)
+    setSlashMatches([])
+  }
+
+  // mentionCandidates joins live channel/workspace members with the three
+  // special kinds. Filtered to whatever the user has typed so far.
+  const mentionCandidates: MentionCandidate[] = useMemo(() => {
+    if (mentionQuery === null) return []
+    const q = mentionQuery.toLowerCase()
+    const memberRows: MentionCandidate[] = (members ?? [])
+      .filter((m) => m.user_id !== currentUserID)
+      .filter((m) => {
+        if (!q) return true
+        return (
+          m.display_name.toLowerCase().includes(q) ||
+          m.email.toLowerCase().includes(q)
+        )
+      })
+      .slice(0, 8)
+      .map((m) => ({
+        kind: 'user' as const,
+        userId: m.user_id,
+        displayName: m.display_name,
+        member: m,
+      }))
+    const specials: MentionCandidate[] = (
+      [
+        { kind: 'channel' as MentionKind, displayName: 'channel' },
+        { kind: 'here' as MentionKind, displayName: 'here' },
+        { kind: 'everyone' as MentionKind, displayName: 'everyone' },
+      ] as MentionCandidate[]
+    ).filter((s) => !q || s.displayName.startsWith(q))
+    return [...memberRows, ...specials]
+  }, [members, mentionQuery, currentUserID])
+
+  function pickMention(c: MentionCandidate) {
+    const e = editorRef.current
+    if (!e) return
+    const label = c.displayName
+    e.chain()
+      .focus()
+      .deleteRange({ from: mentionFrom, to: mentionTo })
+      .insertContent([
+        {
+          type: 'text',
+          text: `@${label}`,
+          marks: [
+            {
+              type: 'mention',
+              attrs: {
+                userId: c.kind === 'user' ? c.userId : null,
+                kind: c.kind,
+                label,
+              },
+            },
+          ],
+        },
+        { type: 'text', text: ' ' },
+      ])
+      .run()
+    setMentionQuery(null)
+  }
+
   return (
     <form
       onSubmit={(e) => {
@@ -3037,8 +3994,37 @@ function Composer({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className="border-t border-zinc-800 p-3"
+      className="relative border-t border-zinc-800 p-3"
     >
+      {slashQuery !== null && slashMatches.length > 0 && (
+        <SlashTypeahead
+          matches={slashMatches}
+          highlight={slashHighlight}
+          onPick={pickSlash}
+          onHoverIndex={setSlashHighlight}
+        />
+      )}
+      {mentionQuery !== null && mentionCandidates.length > 0 && (
+        <MentionTypeahead
+          candidates={mentionCandidates}
+          highlight={mentionHighlight}
+          onPick={pickMention}
+          onHoverIndex={setMentionHighlight}
+        />
+      )}
+      {giphyPicker && (
+        <GiphyPicker
+          query={giphyPicker.query}
+          onCancel={() => setGiphyPicker(null)}
+          onSend={(result) => {
+            typing.stop()
+            post.mutate(
+              { text: result.text, payload: result.payload },
+              { onSuccess: () => resetAfterSend() },
+            )
+          }}
+        />
+      )}
       <div
         className={
           'rounded-lg bg-zinc-900/40 ' +
@@ -3199,6 +4185,115 @@ function ToolbarBtn({
 
 function ToolbarSep() {
   return <span className="mx-1 h-4 w-px bg-zinc-700" aria-hidden />
+}
+
+// MentionTypeahead — floats above the composer while the user is on an
+// @-token. Click a row to insert the resolved mention; the editor wraps
+// the inserted "@DisplayName" text with the `mention` mark so it survives
+// round-trip through TipTap JSON.
+function MentionTypeahead({
+  candidates,
+  highlight,
+  onPick,
+  onHoverIndex,
+}: {
+  candidates: MentionCandidate[]
+  highlight: number
+  onPick: (c: MentionCandidate) => void
+  onHoverIndex: (i: number) => void
+}) {
+  return (
+    <div className="absolute bottom-full left-3 right-3 mb-2 max-h-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl">
+      <div className="border-b border-zinc-800 px-3 py-1.5 text-[11px] uppercase tracking-wide text-zinc-500">
+        Mention someone
+      </div>
+      <ul>
+        {candidates.map((c, i) => (
+          <li key={c.kind === 'user' ? `u:${c.userId}` : `s:${c.kind}`}>
+            <button
+              type="button"
+              onMouseEnter={() => onHoverIndex(i)}
+              onClick={() => onPick(c)}
+              className={
+                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm ' +
+                (i === highlight ? 'bg-zinc-800' : 'hover:bg-zinc-800/60')
+              }
+            >
+              {c.kind === 'user' && c.member ? (
+                <>
+                  <Avatar src={c.member.avatar_url} name={c.displayName} size={20} />
+                  <span className="text-zinc-100">{c.displayName}</span>
+                  <span className="ml-auto text-xs text-zinc-500">{c.member.email}</span>
+                </>
+              ) : (
+                <>
+                  <span className="flex h-5 w-5 items-center justify-center rounded bg-amber-500/20 text-[10px] font-bold text-amber-300">
+                    @
+                  </span>
+                  <span className="text-sky-300">@{c.displayName}</span>
+                  <span className="ml-auto text-xs text-zinc-500">
+                    {c.kind === 'channel' && 'Notify everyone in this channel'}
+                    {c.kind === 'here' && 'Notify channel (active members, currently same as @channel)'}
+                    {c.kind === 'everyone' && 'Notify everyone in this channel'}
+                  </span>
+                </>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// SlashTypeahead — floats above the composer card while the user is still
+// on the command name. Discovery only: clicking a row prefills `/<name> `
+// into the editor so the user can keep typing args. Arrow-key nav is not
+// wired in yet; Enter submits whatever's in the editor (Slack does the
+// same in their simpler clients).
+function SlashTypeahead({
+  matches,
+  highlight,
+  onPick,
+  onHoverIndex,
+}: {
+  matches: SlashCommand[]
+  highlight: number
+  onPick: (name: string) => void
+  onHoverIndex: (i: number) => void
+}) {
+  return (
+    <div className="absolute bottom-full left-3 right-3 mb-2 max-h-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl">
+      <div className="border-b border-zinc-800 px-3 py-1.5 text-[11px] uppercase tracking-wide text-zinc-500">
+        Commands
+      </div>
+      <ul>
+        {matches.map((c, i) => (
+          <li key={c.name}>
+            <button
+              type="button"
+              onMouseEnter={() => onHoverIndex(i)}
+              onClick={() => onPick(c.name)}
+              className={
+                'flex w-full items-baseline gap-2 px-3 py-2 text-left text-sm ' +
+                (i === highlight ? 'bg-zinc-800' : 'hover:bg-zinc-800/60')
+              }
+            >
+              <span className="font-mono text-sky-400">/{c.name}</span>
+              {c.usage && (
+                <span className="font-mono text-xs text-zinc-500">{c.usage}</span>
+              )}
+              {c.description && (
+                <span className="ml-auto truncate text-xs text-zinc-400">
+                  {c.description}
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 function PendingAttachmentChip({

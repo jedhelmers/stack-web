@@ -8,12 +8,13 @@ import {
   useNavigate,
   useParams,
 } from '@tanstack/react-router'
-import { useMe } from './api/hooks'
+import { useMe } from '@stack/client'
 import { Login } from './components/Login'
 import { Chat } from './components/Chat'
 import { Dashboard } from './components/Dashboard'
 import { InviteAccept } from './components/InviteAccept'
 import { RightSidebarProvider } from './components/RightSidebar'
+import { ModalProvider, Modal } from './components/Modal'
 
 // Single source of truth for auth gating. We check the cached /me query.
 // If you land on a protected route while logged out you bounce to /login;
@@ -151,25 +152,28 @@ function ChatScreen({ workspace, channel }: { workspace?: string; channel?: stri
     return null
   }
   return (
-    <RightSidebarProvider>
-      <Chat
-        user={user}
-        activeWorkspaceSlug={workspace ?? null}
-        activeChannelId={channel ?? null}
-        onSelectWorkspace={(slug) =>
-          navigate({ to: '/chat/$workspace', params: { workspace: slug } })
-        }
-        onSelectChannel={(slug, channelId) =>
-          navigate({
-            to: '/chat/$workspace/$channel',
-            params: { workspace: slug, channel: channelId },
-          })
-        }
-        onOpenDashboard={
-          user.is_operator ? () => navigate({ to: '/admin' }) : undefined
-        }
-      />
-    </RightSidebarProvider>
+    <ModalProvider>
+      <RightSidebarProvider>
+        <Chat
+          user={user}
+          activeWorkspaceSlug={workspace ?? null}
+          activeChannelId={channel ?? null}
+          onSelectWorkspace={(slug) =>
+            navigate({ to: '/chat/$workspace', params: { workspace: slug } })
+          }
+          onSelectChannel={(slug, channelId) =>
+            navigate({
+              to: '/chat/$workspace/$channel',
+              params: { workspace: slug, channel: channelId },
+            })
+          }
+          onOpenDashboard={
+            user.is_operator ? () => navigate({ to: '/admin' }) : undefined
+          }
+        />
+      </RightSidebarProvider>
+      <Modal />
+    </ModalProvider>
   )
 }
 

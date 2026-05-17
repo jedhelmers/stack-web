@@ -9,6 +9,8 @@ import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useEffect, useRef } from 'react'
+import { resolvePayloadRenderer } from '@stack/client'
+import { Mention } from './MentionMark'
 
 const editorClasses = [
   // Layout
@@ -82,6 +84,7 @@ export function useChatEditor(opts: EditorOpts = {}): Editor | null {
       Placeholder.configure({
         placeholder: opts.placeholder ?? 'Message…',
       }),
+      Mention,
     ],
     editable: !opts.disabled,
     autofocus: false,
@@ -155,6 +158,13 @@ export function EditorView({ editor }: { editor: Editor | null }) {
 // edit that lands via realtime would leave the on-screen message frozen at
 // its pre-edit text.
 export function MessageRender({ doc }: { doc: JSONContent }) {
+  // Plugin escape hatch: if the message's payload is a registered custom
+  // block (e.g. { type: 'giphy', ... }) rather than a TipTap doc, hand it
+  // off to the registered renderer. Pure TipTap docs (type === 'doc') keep
+  // flowing through the normal editor path below.
+  const PayloadComponent = resolvePayloadRenderer(doc)
+  // Render hooks unconditionally before the early return so React's hook
+  // order stays stable across the doc/custom-payload toggle.
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false, heading: false, horizontalRule: false }),
@@ -166,6 +176,7 @@ export function MessageRender({ doc }: { doc: JSONContent }) {
           target: '_blank',
         },
       }),
+      Mention,
     ],
     editable: false,
     content: doc,
@@ -187,6 +198,10 @@ export function MessageRender({ doc }: { doc: JSONContent }) {
     lastSerializedRef.current = serialized
     editor.commands.setContent(doc, { emitUpdate: false })
   }, [editor, serialized, doc])
+
+  if (PayloadComponent) {
+    return <PayloadComponent payload={doc} />
+  }
 
   return <EditorContent editor={editor} />
 }
