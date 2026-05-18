@@ -1,35 +1,53 @@
 {
   "name": "stack-web",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Drop-in React screens (Chat, Dashboard, Login, InviteAccept) for the Stack chat platform.",
   "type": "module",
+  "main": "./lib/index.js",
+  "module": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./style.css": "./lib/style.css"
+  },
+  "files": [
+    "lib",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "scripts": {
-    "build": "npm run build:css && npm run build:js",
-    "build:js": "node build.mjs",
-    "build:css": "tailwindcss -i src/index.css -o dist/index.css --minify",
-    "dev": "node build.mjs --watch",
+    "build": "npm run build:js && npm run build:css",
+    "build:js": "tsc -p tsconfig.build.json",
+    "build:css": "tailwindcss -i src/index.css -o lib/style.css --minify",
+    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf lib"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
     "@stack/client": "github:jedhelmers/stack-client#v0.2.3",
-    "@tanstack/react-query": "^5.62.0",
-    "@tanstack/react-router": "^1.95.0",
     "@tiptap/extension-link": "^3.23.4",
     "@tiptap/extension-placeholder": "^3.23.4",
     "@tiptap/extension-underline": "^3.23.4",
     "@tiptap/pm": "^3.23.4",
     "@tiptap/react": "^3.23.4",
     "@tiptap/starter-kit": "^3.23.4",
-    "lucide-react": "^1.16.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "lucide-react": "^1.16.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",
+    "@tanstack/react-query": "^5.62.0",
     "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "esbuild": "^0.24.0",
+    "react": "^18.3.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.3"
   }

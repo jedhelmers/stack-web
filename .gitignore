@@ -1,6 +1,5 @@
 node_modules
-dist
-bin
+lib
 .env
 .env.local
 *.log

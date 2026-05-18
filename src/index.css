@@ -2,32 +2,152 @@
 
 @source "./**/*.{html,tsx,ts}";
 
-/* App-wide text colour. Lives on :root so any descendant inherits it, but
-   Tailwind's `text-*` utilities (e.g. text-zinc-500 for muted captions) still
-   win where they're explicitly set. */
+/* =============================================================
+   Stack Web — theme tokens
+   -------------------------------------------------------------
+   The library's components use plain Tailwind colour utilities
+   (`bg-zinc-950`, `text-rose-400`, `border-sky-500`, …). Tailwind
+   v4 emits those utilities as references to `var(--color-…)`, so
+   here we redirect each Tailwind colour token to a semantic
+   `--stack-*` variable. Override the `--stack-*` tokens (either
+   in your own CSS or via `applyTheme()` from 'stack-web') to
+   retheme the entire library at runtime.
+   ============================================================= */
+
 :root {
-  --text-color: rgba(255, 255, 255, 0.78);
+  /* Body / prominent text. Defaults to 78% white so dark surfaces
+     get comfortable contrast without going full #fff. The
+     `.text-zinc-100` and `.text-zinc-300` utilities below also
+     read this token so the highest-emphasis labels render at the
+     same opacity as <body>. */
+  --stack-text-body: rgba(255, 255, 255, 0.78);
+
+  /* Neutral scale — chrome, panels, type.
+     Lightest (100) → darkest (950). Maps to Tailwind's zinc. */
+  --stack-neutral-100: oklch(96.7% 0.001 286.375);
+  --stack-neutral-200: oklch(92% 0.004 286.32);
+  --stack-neutral-300: oklch(87.1% 0.006 286.286);
+  --stack-neutral-400: oklch(70.5% 0.015 286.067);
+  --stack-neutral-500: oklch(55.2% 0.016 285.938);
+  --stack-neutral-600: oklch(44.2% 0.017 285.786);
+  --stack-neutral-700: oklch(37% 0.013 285.805);
+  --stack-neutral-800: oklch(27.4% 0.006 286.033);
+  --stack-neutral-900: oklch(21% 0.006 285.885);
+  --stack-neutral-950: oklch(14.1% 0.005 285.823);
+
+  /* Accent — primary CTA, focus rings, links. Maps to Tailwind's sky. */
+  --stack-accent-300: oklch(82.8% 0.111 230.318);
+  --stack-accent-400: oklch(74.6% 0.16 232.661);
+  --stack-accent-500: oklch(68.5% 0.169 237.323);
+  --stack-accent-600: oklch(58.8% 0.158 241.966);
+  --stack-accent-900: oklch(39.1% 0.09 240.876);
+  --stack-accent-950: oklch(29.3% 0.066 243.157);
+
+  /* Success — confirmations, healthy states. Maps to emerald. */
+  --stack-success-400: oklch(76.5% 0.177 163.223);
+  --stack-success-500: oklch(69.6% 0.17 162.48);
+  --stack-success-600: oklch(59.6% 0.145 163.225);
+  --stack-success-700: oklch(50.8% 0.118 165.612);
+  --stack-success-900: oklch(37.8% 0.077 168.94);
+  --stack-success-950: oklch(26.2% 0.051 172.552);
+
+  /* Warning — caution, pending states. Maps to amber. */
+  --stack-warning-200: oklch(92.4% 0.12 95.746);
+  --stack-warning-300: oklch(87.9% 0.169 91.605);
+  --stack-warning-400: oklch(82.8% 0.189 84.429);
+  --stack-warning-500: oklch(76.9% 0.188 70.08);
+  --stack-warning-900: oklch(41.4% 0.112 45.904);
+  --stack-warning-950: oklch(27.9% 0.077 45.635);
+
+  /* Danger — errors, destructive actions. Maps to rose. */
+  --stack-danger-300: oklch(81% 0.117 11.638);
+  --stack-danger-400: oklch(71.2% 0.194 13.428);
+  --stack-danger-500: oklch(64.5% 0.246 16.439);
+  --stack-danger-900: oklch(41% 0.159 10.272);
+  --stack-danger-950: oklch(27.1% 0.105 12.094);
+
+  /* Info — secondary accent for less-urgent badges. Maps to violet. */
+  --stack-info-400: oklch(70.2% 0.183 293.541);
+  --stack-info-900: oklch(38% 0.189 293.745);
+  --stack-info-950: oklch(28.3% 0.141 291.089);
+
+  /* Highlight — inline marks in the rich-text editor. Maps to orange. */
+  --stack-highlight-400: oklch(75% 0.183 55.934);
+
+  /* =============================================================
+     Tailwind colour rewiring
+     -------------------------------------------------------------
+     Every Tailwind colour utility the library uses reads through
+     one of these vars. Don't override the `--color-*` tokens
+     directly — change `--stack-*` above (or pass a palette to
+     `applyTheme()`) and they'll cascade everywhere. Add new
+     entries here only when a component starts using a Tailwind
+     shade we haven't routed yet.
+     ============================================================= */
+
+  --color-zinc-100: var(--stack-neutral-100);
+  --color-zinc-200: var(--stack-neutral-200);
+  --color-zinc-300: var(--stack-neutral-300);
+  --color-zinc-400: var(--stack-neutral-400);
+  --color-zinc-500: var(--stack-neutral-500);
+  --color-zinc-600: var(--stack-neutral-600);
+  --color-zinc-700: var(--stack-neutral-700);
+  --color-zinc-800: var(--stack-neutral-800);
+  --color-zinc-900: var(--stack-neutral-900);
+  --color-zinc-950: var(--stack-neutral-950);
+
+  --color-sky-300: var(--stack-accent-300);
+  --color-sky-400: var(--stack-accent-400);
+  --color-sky-500: var(--stack-accent-500);
+  --color-sky-600: var(--stack-accent-600);
+  --color-sky-900: var(--stack-accent-900);
+  --color-sky-950: var(--stack-accent-950);
+
+  --color-emerald-400: var(--stack-success-400);
+  --color-emerald-500: var(--stack-success-500);
+  --color-emerald-600: var(--stack-success-600);
+  --color-emerald-700: var(--stack-success-700);
+  --color-emerald-900: var(--stack-success-900);
+  --color-emerald-950: var(--stack-success-950);
+
+  --color-amber-200: var(--stack-warning-200);
+  --color-amber-300: var(--stack-warning-300);
+  --color-amber-400: var(--stack-warning-400);
+  --color-amber-500: var(--stack-warning-500);
+  --color-amber-900: var(--stack-warning-900);
+  --color-amber-950: var(--stack-warning-950);
+
+  --color-rose-300: var(--stack-danger-300);
+  --color-rose-400: var(--stack-danger-400);
+  --color-rose-500: var(--stack-danger-500);
+  --color-rose-900: var(--stack-danger-900);
+  --color-rose-950: var(--stack-danger-950);
+
+  --color-violet-400: var(--stack-info-400);
+  --color-violet-900: var(--stack-info-900);
+  --color-violet-950: var(--stack-info-950);
+
+  --color-orange-400: var(--stack-highlight-400);
 }
 
 body {
-  color: var(--text-color);
+  color: var(--stack-text-body);
 }
 
-/* Most prominent-text styling in the app reaches for `text-zinc-100`, which
-   compiles to `color: var(--color-zinc-100)` (~#f4f4f5). That fights our
-   --text-color preference. Redirect *the text utility only* — `bg-zinc-100`
-   and `border-zinc-100` keep their original tone because they reference a
-   different CSS property. Same treatment for the secondary tier text-zinc-300. */
+/* `text-zinc-100` and `text-zinc-300` are used across the app for
+   high-emphasis labels. Render them at the body opacity so a
+   single token (`--stack-text-body`) controls all foreground
+   prose. `bg-zinc-100` and `border-zinc-100` stay tied to
+   `--stack-neutral-100` because they target other CSS properties. */
 .text-zinc-100,
-.hover\:text-zinc-100:hover {
-  color: var(--text-color);
-}
+.hover\:text-zinc-100:hover,
 .text-zinc-300 {
-  color: var(--text-color);
+  color: var(--stack-text-body);
 }
 
-/* The shell never scrolls. Every scroll happens inside a designated panel
-   (chat message list, dashboard tables, modal bodies). */
+/* The shell never scrolls. Every scroll happens inside a
+   designated panel (chat message list, dashboard tables, modal
+   bodies). */
 html,
 body,
 #root {
@@ -35,9 +155,9 @@ body,
   overflow: hidden;
 }
 
-/* TipTap renders into a contentEditable div with a UA focus outline. The
-   composer card owns the focus styling; suppress the inner one here so the
-   browser doesn't draw a competing ring. */
+/* TipTap renders into a contentEditable div with a UA focus
+   outline. The composer card owns the focus styling; suppress the
+   inner one so the browser doesn't draw a competing ring. */
 .ProseMirror,
 .ProseMirror:focus,
 .ProseMirror:focus-visible {
