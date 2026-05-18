@@ -216,7 +216,15 @@ function DashboardTabScreen() {
 }
 
 // keep this in sync with Dashboard.tsx Tab type
-type DashboardTab = 'stats' | 'workspaces' | 'channels' | 'dms' | 'users' | 'audit' | 'health'
+type DashboardTab =
+  | 'stats'
+  | 'workspaces'
+  | 'channels'
+  | 'dms'
+  | 'users'
+  | 'apps'
+  | 'audit'
+  | 'health'
 
 function Loading() {
   return (

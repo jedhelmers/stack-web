@@ -2,23 +2,30 @@ import { useState } from 'react'
 import {
   useHealth,
   useLogout,
+  useOperatorAPIKeys,
+  useOperatorApps,
   useOperatorAudit,
   useOperatorChannels,
   useOperatorDMs,
   useOperatorStats,
   useOperatorUsers,
   useOperatorWorkspaces,
+  useOpCreateAPIKey,
+  useOpCreateApp,
   useOpCreateUser,
   useOpCreateWorkspace,
   useOpDeleteUser,
   useOpDeleteWorkspace,
   useOpForceLogoutUser,
   useOpLockUser,
+  useOpRevokeAPIKey,
   useOpSuspendWorkspace,
   useOpUnlockUser,
   useOpUnsuspendWorkspace,
 } from '@stack/client'
 import type {
+  OperatorAPIKey,
+  OperatorApp,
   OperatorAuditEntry,
   OperatorChannel,
   OperatorDM,
@@ -27,9 +34,26 @@ import type {
   User,
 } from '@stack/client'
 
-type Tab = 'stats' | 'workspaces' | 'channels' | 'dms' | 'users' | 'audit' | 'health'
+type Tab =
+  | 'stats'
+  | 'workspaces'
+  | 'channels'
+  | 'dms'
+  | 'users'
+  | 'apps'
+  | 'audit'
+  | 'health'
 
-const ALL_TABS: Tab[] = ['stats', 'workspaces', 'channels', 'dms', 'users', 'audit', 'health']
+const ALL_TABS: Tab[] = [
+  'stats',
+  'workspaces',
+  'channels',
+  'dms',
+  'users',
+  'apps',
+  'audit',
+  'health',
+]
 
 export function Dashboard({
   user,
@@ -65,6 +89,7 @@ export function Dashboard({
           <NavItem active={tab === 'channels'} onClick={() => setTab('channels')}>Channels</NavItem>
           <NavItem active={tab === 'dms'} onClick={() => setTab('dms')}>Direct messages</NavItem>
           <NavItem active={tab === 'users'} onClick={() => setTab('users')}>Users</NavItem>
+          <NavItem active={tab === 'apps'} onClick={() => setTab('apps')}>Parent apps</NavItem>
           <NavItem active={tab === 'audit'} onClick={() => setTab('audit')}>Audit log</NavItem>
           <NavItem active={tab === 'health'} onClick={() => setTab('health')}>System health</NavItem>
         </nav>
@@ -96,6 +121,7 @@ export function Dashboard({
           {tab === 'channels' && <ChannelsView />}
           {tab === 'dms' && <DMsView />}
           {tab === 'users' && <UsersView />}
+          {tab === 'apps' && <AppsView />}
           {tab === 'audit' && <AuditView />}
           {tab === 'health' && <HealthView />}
         </div>
@@ -776,6 +802,319 @@ function RelTime({ ts }: { ts?: string }) {
     sec < 86400 ? `${Math.round(sec / 3600)}h ago` :
     `${Math.round(sec / 86400)}d ago`
   return <span title={d.toISOString()}>{text}</span>
+}
+
+// ---- Parent apps + API keys -----------------------------------------------
+
+// AppsView is the operator screen for managing parent apps and their API
+// keys. Scope-wise it's "just enough to mint a key end-to-end" — no
+// allowed_origins editor, no suspend buttons. Those endpoints exist on
+// the server; this UI doesn't surface them yet.
+function AppsView() {
+  const apps = useOperatorApps()
+  const [selectedID, setSelectedID] = useState<string | null>(null)
+
+  if (apps.isLoading) return <Loading />
+  if (apps.error) return <ErrorMsg message={String(apps.error)} />
+  const rows = apps.data ?? []
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold">Parent apps</h1>
+      <p className="text-sm text-zinc-400">
+        Each parent app is a walled-garden tenant. End users live under exactly
+        one app and never see another's workspaces. API keys authenticate the
+        parent app's backend when it calls{' '}
+        <code className="rounded bg-zinc-800 px-1 py-0.5 text-xs">/v1/auth/sso/exchange</code>.
+      </p>
+
+      <CreateAppInline />
+
+      <div className="overflow-x-auto rounded border border-zinc-800">
+        <table className="w-full text-sm">
+          <thead className="bg-zinc-900/50 text-left text-xs uppercase text-zinc-500">
+            <tr>
+              <th className="px-3 py-2">Slug</th>
+              <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Origins</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {rows.map((app) => (
+              <tr key={app.id} className="hover:bg-zinc-900/40">
+                <td className="px-3 py-2 font-mono text-xs">{app.slug}</td>
+                <td className="px-3 py-2">{app.name}</td>
+                <td className="px-3 py-2"><StatusPill status={app.status} /></td>
+                <td className="px-3 py-2 text-xs text-zinc-400">
+                  {app.allowed_origins.length === 0
+                    ? <span className="text-zinc-600">—</span>
+                    : app.allowed_origins.join(', ')}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <RowActions>
+                    <RowButton onClick={() => setSelectedID(app.id)}>Manage keys</RowButton>
+                  </RowActions>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <div className="p-6 text-center text-sm text-zinc-500">
+            No parent apps yet — create one above.
+          </div>
+        )}
+      </div>
+
+      {selectedID && (
+        <KeysModal
+          app={rows.find((a) => a.id === selectedID)!}
+          onClose={() => setSelectedID(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// CreateAppInline is the "minimal scope" replacement for a separate modal —
+// the create form lives on the same screen as the list. Allowed origins is
+// a single comma-separated input here; a chip editor can come later when an
+// operator actually needs to edit origins post-creation.
+function CreateAppInline() {
+  const create = useOpCreateApp()
+  const [slug, setSlug] = useState('')
+  const [name, setName] = useState('')
+  const [origins, setOrigins] = useState('')
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        const allowed = origins
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+        create.mutate(
+          { slug, name, allowed_origins: allowed },
+          {
+            onSuccess: () => {
+              setSlug('')
+              setName('')
+              setOrigins('')
+            },
+          },
+        )
+      }}
+      className="rounded border border-zinc-800 bg-zinc-900/40 p-4"
+    >
+      <div className="mb-3 text-sm font-medium">Register a new parent app</div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <Field label="Slug" hint="3-64 chars, lowercase letters/digits/hyphens">
+          <input
+            value={slug}
+            onChange={(e) => setSlug(e.target.value.toLowerCase())}
+            required
+            className={modalInputClass}
+            placeholder="acme-portal"
+          />
+        </Field>
+        <Field label="Name">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            className={modalInputClass}
+            placeholder="Acme Portal"
+          />
+        </Field>
+        <Field
+          label="Allowed origins"
+          hint="Comma-separated. Wildcards allowed for one host label."
+        >
+          <input
+            value={origins}
+            onChange={(e) => setOrigins(e.target.value)}
+            className={modalInputClass + ' font-mono text-xs'}
+            placeholder="https://app.acme.com, https://*.acme.com"
+          />
+        </Field>
+      </div>
+      {create.error && <p className="mt-2 text-sm text-rose-400">{String(create.error)}</p>}
+      <div className="mt-3 flex justify-end">
+        <button
+          type="submit"
+          disabled={create.isPending || !slug || !name}
+          className="rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+        >
+          {create.isPending ? 'Creating…' : 'Create app'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+// KeysModal shows every key for an app + a mint-new-key form. Plaintext is
+// surfaced once via PlaintextReveal and then unreachable.
+function KeysModal({ app, onClose }: { app: OperatorApp; onClose: () => void }) {
+  const keys = useOperatorAPIKeys(app.id)
+  const create = useOpCreateAPIKey(app.id)
+  const revoke = useOpRevokeAPIKey(app.id)
+  const [label, setLabel] = useState('')
+  const [scope, setScope] = useState('sso:exchange')
+  const [reveal, setReveal] = useState<string | null>(null)
+
+  return (
+    <Modal title={`Keys — ${app.name}`} onClose={onClose}>
+      <div className="space-y-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            create.mutate(
+              { label, scopes: scope.split(',').map((s) => s.trim()).filter(Boolean) },
+              {
+                onSuccess: (k) => {
+                  setReveal(k.plaintext)
+                  setLabel('')
+                },
+              },
+            )
+          }}
+          className="space-y-3 rounded border border-zinc-800 bg-zinc-950 p-3"
+        >
+          <div className="text-xs uppercase tracking-wider text-zinc-500">Mint a new key</div>
+          <Field label="Label">
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="prod backend"
+              required
+              className={modalInputClass}
+            />
+          </Field>
+          <Field label="Scopes" hint="Comma-separated. sso:exchange is the only one in use today.">
+            <input
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              className={modalInputClass + ' font-mono text-xs'}
+            />
+          </Field>
+          {create.error && <p className="text-sm text-rose-400">{String(create.error)}</p>}
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={create.isPending}
+              className="rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+            >
+              {create.isPending ? 'Minting…' : 'Mint key'}
+            </button>
+          </div>
+        </form>
+
+        {reveal && <PlaintextReveal plaintext={reveal} onDismiss={() => setReveal(null)} />}
+
+        <div>
+          <div className="mb-2 text-xs uppercase tracking-wider text-zinc-500">Existing keys</div>
+          {keys.isLoading ? (
+            <Loading />
+          ) : keys.error ? (
+            <ErrorMsg message={String(keys.error)} />
+          ) : (
+            <KeysList rows={keys.data ?? []} onRevoke={(id) => revoke.mutate(id)} />
+          )}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function KeysList({
+  rows,
+  onRevoke,
+}: {
+  rows: OperatorAPIKey[]
+  onRevoke: (id: string) => void
+}) {
+  if (rows.length === 0) {
+    return <div className="text-sm text-zinc-500">No keys minted yet.</div>
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((k) => (
+        <div
+          key={k.id}
+          className="flex items-center justify-between rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+        >
+          <div className="min-w-0">
+            <div className="font-mono text-xs text-zinc-300">{k.key_prefix}…</div>
+            <div className="mt-0.5 text-xs text-zinc-500">
+              {k.label || <span className="italic text-zinc-600">no label</span>}
+              {' · '}
+              {k.scopes.length > 0 ? k.scopes.join(', ') : 'no scopes'}
+              {' · last used '}
+              <RelTime ts={k.last_used_at} />
+            </div>
+          </div>
+          {k.revoked_at ? (
+            <span className="text-xs text-zinc-600">revoked</span>
+          ) : (
+            <RowButton variant="danger" onClick={() => onRevoke(k.id)}>
+              Revoke
+            </RowButton>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// PlaintextReveal is the one-time view of a freshly-minted API key. The
+// plaintext is held in component state only; closing the panel discards it
+// for good. We deliberately do NOT render a "copy + show again" affordance —
+// the operator gets one shot to copy, exactly as the server promises.
+function PlaintextReveal({
+  plaintext,
+  onDismiss,
+}: {
+  plaintext: string
+  onDismiss: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="rounded border border-amber-900/60 bg-amber-950/30 p-3">
+      <div className="mb-2 text-xs font-medium uppercase tracking-wider text-amber-300">
+        Save this key now — it won't be shown again
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 select-all break-all rounded bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100">
+          {plaintext}
+        </code>
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(plaintext)
+              setCopied(true)
+            } catch {
+              // Clipboard API requires secure context. Selection fallback
+              // works without it.
+            }
+          }}
+          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="rounded border border-amber-900/60 bg-amber-950/50 px-2 py-1 text-xs text-amber-200 hover:bg-amber-900/40"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function Loading() {
