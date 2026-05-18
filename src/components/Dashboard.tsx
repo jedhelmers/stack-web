@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
+  APIError,
   useHealth,
   useLogout,
+  useMembers,
   useOperatorAPIKeys,
   useOperatorApps,
   useOperatorAudit,
@@ -10,6 +13,7 @@ import {
   useOperatorStats,
   useOperatorUsers,
   useOperatorWorkspaces,
+  useOpAddWorkspaceMember,
   useOpCreateAPIKey,
   useOpCreateApp,
   useOpCreateUser,
@@ -18,12 +22,17 @@ import {
   useOpDeleteWorkspace,
   useOpForceLogoutUser,
   useOpLockUser,
+  useOpRemoveWorkspaceMember,
+  useOpResetUserPassword,
   useOpRevokeAPIKey,
   useOpSuspendWorkspace,
   useOpUnlockUser,
   useOpUnsuspendWorkspace,
+  useOpUpdateMemberRole,
+  useOpUpdateUser,
 } from '@stack/client'
 import type {
+  Member,
   OperatorAPIKey,
   OperatorApp,
   OperatorAuditEntry,
@@ -33,6 +42,9 @@ import type {
   OperatorWorkspace,
   User,
 } from '@stack/client'
+
+type MemberRole = 'owner' | 'admin' | 'member' | 'guest' | 'bot'
+const MEMBER_ROLES: MemberRole[] = ['owner', 'admin', 'member', 'guest', 'bot']
 
 type Tab =
   | 'stats'
@@ -212,6 +224,7 @@ function StatCard({ label, value }: { label: string; value: number }) {
 function WorkspacesView() {
   const [q, setQ] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [membersFor, setMembersFor] = useState<OperatorWorkspace | null>(null)
   const { data, isLoading, error } = useOperatorWorkspaces(q)
   const suspend = useOpSuspendWorkspace()
   const unsuspend = useOpUnsuspendWorkspace()
@@ -241,6 +254,7 @@ function WorkspacesView() {
             <RelTime ts={w.last_message_at} />,
             <StatusPill status={w.status} />,
             <RowActions>
+              <RowButton onClick={() => setMembersFor(w)}>Members</RowButton>
               {w.status === 'active' ? (
                 <RowButton
                   onClick={() => suspend.mutate(w.id)}
@@ -274,6 +288,12 @@ function WorkspacesView() {
         />
       )}
       {showCreate && <CreateWorkspaceModal onClose={() => setShowCreate(false)} />}
+      {membersFor && (
+        <WorkspaceMembersModal
+          workspace={membersFor}
+          onClose={() => setMembersFor(null)}
+        />
+      )}
     </div>
   )
 }
@@ -343,11 +363,292 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ---- Workspace members modal ----------------------------------------------
+
+// Surfaces the operator endpoints for managing membership on an existing
+// workspace. Loads the live member list via the regular workspace endpoint
+// (same shape the chat UI uses) and posts/patches/deletes through the
+// operator-scoped hooks, which are gated by the operator session cookie.
+function WorkspaceMembersModal({
+  workspace,
+  onClose,
+}: {
+  workspace: OperatorWorkspace
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const members = useMembers(workspace.slug)
+  const add = useOpAddWorkspaceMember(workspace.id)
+  const update = useOpUpdateMemberRole(workspace.id)
+  const remove = useOpRemoveWorkspaceMember(workspace.id)
+
+  // The operator hooks invalidate ['op'] for the workspace list, but the
+  // members list itself is keyed by ['members', slug] via useMembers. Refetch
+  // it after every mutation so the list reflects the change immediately.
+  const refreshMembers = () =>
+    qc.invalidateQueries({ queryKey: ['members', workspace.slug] })
+
+  return (
+    <Modal title={`Members — ${workspace.name}`} onClose={onClose} size="lg">
+      <div className="space-y-4">
+        <AddMemberForm
+          add={add}
+          existingMemberIds={new Set((members.data ?? []).map((m) => m.user_id))}
+          onAdded={refreshMembers}
+        />
+
+        <div>
+          <div className="mb-2 text-xs uppercase tracking-wider text-zinc-500">
+            Current members
+          </div>
+          {members.isLoading ? (
+            <Loading />
+          ) : members.error ? (
+            <ErrorMsg message={String(members.error)} />
+          ) : (
+            <MembersList
+              rows={members.data ?? []}
+              onRoleChange={(userID, role) =>
+                update.mutate(
+                  { user_id: userID, role },
+                  { onSuccess: refreshMembers },
+                )
+              }
+              onRemove={(m) => {
+                if (confirm(`Remove ${m.email} from "${workspace.slug}"?`)) {
+                  remove.mutate(m.user_id, { onSuccess: refreshMembers })
+                }
+              }}
+              busyUserId={
+                update.isPending
+                  ? update.variables?.user_id
+                  : remove.isPending
+                    ? remove.variables
+                    : undefined
+              }
+            />
+          )}
+          {update.error && (
+            <p className="mt-2 text-sm text-rose-400">{formatMemberError(update.error)}</p>
+          )}
+          {remove.error && (
+            <p className="mt-2 text-sm text-rose-400">{formatMemberError(remove.error)}</p>
+          )}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// formatMemberError surfaces the 409 cross_app_membership case as a friendly
+// sentence. Everything else falls back to the raw error string — same
+// contract as the other modal error displays in this file.
+function formatMemberError(err: unknown): string {
+  if (err instanceof APIError && err.status === 409) {
+    return "User belongs to a different parent app and can't join this workspace."
+  }
+  return String(err)
+}
+
+type AddMemberMutation = ReturnType<typeof useOpAddWorkspaceMember>
+
+function AddMemberForm({
+  add,
+  existingMemberIds,
+  onAdded,
+}: {
+  add: AddMemberMutation
+  existingMemberIds: Set<string>
+  onAdded: () => void
+}) {
+  const [picked, setPicked] = useState<OperatorUser | null>(null)
+  const [role, setRole] = useState<MemberRole>('member')
+  const [q, setQ] = useState('')
+  // Debounce the typeahead so each keystroke doesn't fire a search request.
+  const [debouncedQ, setDebouncedQ] = useState('')
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQ(q.trim()), 250)
+    return () => window.clearTimeout(t)
+  }, [q])
+
+  const users = useOperatorUsers(debouncedQ)
+  const suggestions = (users.data ?? [])
+    .filter((u) => !existingMemberIds.has(u.id))
+    .slice(0, 8)
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!picked) return
+        add.mutate(
+          { user_id: picked.id, role },
+          {
+            onSuccess: () => {
+              setPicked(null)
+              setQ('')
+              setRole('member')
+              onAdded()
+            },
+          },
+        )
+      }}
+      className="space-y-3 rounded border border-zinc-800 bg-zinc-950 p-3"
+    >
+      <div className="text-xs uppercase tracking-wider text-zinc-500">Add member</div>
+
+      <Field label="User">
+        {picked ? (
+          <div className="mt-1 flex items-center justify-between rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm">
+            <div className="min-w-0">
+              <div className="truncate text-zinc-100">{picked.display_name}</div>
+              <div className="truncate text-xs text-zinc-500">{picked.email}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setPicked(null)
+                setQ('')
+              }}
+              className="ml-2 text-xs text-zinc-400 hover:text-zinc-200"
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search by email or display name…"
+              className={modalInputClass}
+            />
+            {debouncedQ && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 z-10 mt-1 max-h-56 overflow-y-auto rounded border border-zinc-700 bg-zinc-950 shadow-lg">
+                {suggestions.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => setPicked(u)}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-zinc-800"
+                  >
+                    <div className="text-zinc-100">{u.display_name}</div>
+                    <div className="text-xs text-zinc-500">{u.email}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {debouncedQ && !users.isLoading && suggestions.length === 0 && (
+              <div className="mt-1 text-xs text-zinc-500">No matching users.</div>
+            )}
+          </div>
+        )}
+      </Field>
+
+      <Field label="Role">
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as MemberRole)}
+          className={modalInputClass}
+        >
+          {MEMBER_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {add.error && <p className="text-sm text-rose-400">{formatMemberError(add.error)}</p>}
+
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={!picked || add.isPending}
+          className="rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+        >
+          {add.isPending ? 'Adding…' : 'Add member'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function MembersList({
+  rows,
+  onRoleChange,
+  onRemove,
+  busyUserId,
+}: {
+  rows: Member[]
+  onRoleChange: (userID: string, role: MemberRole) => void
+  onRemove: (m: Member) => void
+  busyUserId?: string
+}) {
+  if (rows.length === 0) {
+    return <div className="text-sm text-zinc-500">No members yet.</div>
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((m) => {
+        const busy = busyUserId === m.user_id
+        return (
+          <div
+            key={m.user_id}
+            className="flex items-center gap-3 rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm"
+          >
+            <Avatar url={m.avatar_url} name={m.display_name} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-zinc-100">{m.display_name}</div>
+              <div className="truncate text-xs text-zinc-500">{m.email}</div>
+            </div>
+            <select
+              value={MEMBER_ROLES.includes(m.role as MemberRole) ? m.role : 'member'}
+              onChange={(e) => onRoleChange(m.user_id, e.target.value as MemberRole)}
+              disabled={busy}
+              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 disabled:opacity-50"
+            >
+              {MEMBER_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+            <RowButton variant="danger" onClick={() => onRemove(m)} disabled={busy}>
+              Remove
+            </RowButton>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Avatar({ url, name }: { url?: string; name: string }) {
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="h-7 w-7 rounded-full bg-zinc-800 object-cover"
+      />
+    )
+  }
+  const initial = name.trim().charAt(0).toUpperCase() || '?'
+  return (
+    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 text-xs text-zinc-300">
+      {initial}
+    </div>
+  )
+}
+
 // ---- Users -----------------------------------------------------------------
 
 function UsersView() {
   const [q, setQ] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [resetFor, setResetFor] = useState<OperatorUser | null>(null)
+  const [editFor, setEditFor] = useState<OperatorUser | null>(null)
   const { data, isLoading, error } = useOperatorUsers(q)
   const lock = useOpLockUser()
   const unlock = useOpUnlockUser()
@@ -378,6 +679,7 @@ function UsersView() {
             <RelTime ts={u.last_login_at} />,
             <StatusPill status={u.status} />,
             <RowActions>
+              <RowButton onClick={() => setEditFor(u)}>Edit</RowButton>
               {u.status === 'active' ? (
                 <RowButton onClick={() => lock.mutate(u.id)} variant="warn" disabled={lock.isPending}>Lock</RowButton>
               ) : (
@@ -399,6 +701,7 @@ function UsersView() {
               >
                 Force logout
               </RowButton>
+              <RowButton onClick={() => setResetFor(u)}>Reset password</RowButton>
               <RowButton
                 onClick={() => {
                   if (u.owned_workspace_count > 0) {
@@ -420,7 +723,244 @@ function UsersView() {
         />
       )}
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
+      {resetFor && (
+        <ResetPasswordModal user={resetFor} onClose={() => setResetFor(null)} />
+      )}
+      {editFor && (
+        <EditUserModal user={editFor} onClose={() => setEditFor(null)} />
+      )}
     </div>
+  )
+}
+
+// EditUserModal — operator-facing edit of identity-shaped fields (display
+// name, email, operator role). Mirrors useUpdateMe semantics: only changed
+// fields are sent; an empty diff just closes the modal. Server validates
+// email uniqueness — 409 surfaces inline as a friendly message.
+function EditUserModal({
+  user,
+  onClose,
+}: {
+  user: OperatorUser
+  onClose: () => void
+}) {
+  const [displayName, setDisplayName] = useState(user.display_name)
+  const [email, setEmail] = useState(user.email)
+  const [isOperator, setIsOperator] = useState(user.is_operator)
+  const update = useOpUpdateUser()
+
+  // Build a patch with only the fields that actually changed. An empty
+  // patch is a no-op and just closes the modal — same pattern as the
+  // self-service profile save in Chat.tsx.
+  function diff(): {
+    display_name?: string
+    email?: string
+    is_operator?: boolean
+  } {
+    const out: { display_name?: string; email?: string; is_operator?: boolean } = {}
+    const trimmedName = displayName.trim()
+    const trimmedEmail = email.trim()
+    if (trimmedName !== user.display_name) out.display_name = trimmedName
+    if (trimmedEmail !== user.email) out.email = trimmedEmail
+    if (isOperator !== user.is_operator) out.is_operator = isOperator
+    return out
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const patch = diff()
+    if (Object.keys(patch).length === 0) {
+      onClose()
+      return
+    }
+    // Confirm operator-role flips — they change what the user can see/do.
+    if (patch.is_operator !== undefined) {
+      const verb = patch.is_operator ? 'Grant' : 'Revoke'
+      if (!confirm(`${verb} operator role for ${user.email}?`)) return
+    }
+    update.mutate(
+      { id: user.id, ...patch },
+      { onSuccess: () => onClose() },
+    )
+  }
+
+  const emailTaken =
+    update.error instanceof APIError && update.error.status === 409
+
+  return (
+    <Modal title={`Edit user — ${user.email}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <Field label="Display name">
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            required
+            className={modalInputClass}
+          />
+        </Field>
+        <Field label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className={modalInputClass}
+          />
+          {emailTaken && (
+            <span className="mt-1 block text-xs text-rose-400">
+              That email is already in use.
+            </span>
+          )}
+        </Field>
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={isOperator}
+            onChange={(e) => setIsOperator(e.target.checked)}
+          />
+          Operator role
+        </label>
+
+        {update.error && !emailTaken && (
+          <p className="text-sm text-rose-400">{String(update.error)}</p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={update.isPending}
+            className="rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+          >
+            {update.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// ResetPasswordModal — operator-set, no email flow. Echoes the chosen password
+// back in a one-time PlaintextReveal so it can be copied to a trusted channel
+// for the affected user. Defaults to also force-logging out the user, since a
+// reset implies their previous sessions should be invalidated.
+function ResetPasswordModal({
+  user,
+  onClose,
+}: {
+  user: OperatorUser
+  onClose: () => void
+}) {
+  const reset = useOpResetUserPassword()
+  const forceLogout = useOpForceLogoutUser()
+  const [pwd, setPwd] = useState('')
+  const [confirmPwd, setConfirmPwd] = useState('')
+  const [alsoLogout, setAlsoLogout] = useState(true)
+  const [localErr, setLocalErr] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState<string | null>(null)
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLocalErr(null)
+    if (pwd.length < 8) {
+      setLocalErr('Password must be at least 8 characters.')
+      return
+    }
+    if (pwd !== confirmPwd) {
+      setLocalErr('Passwords do not match.')
+      return
+    }
+    if (!confirm(`Reset password for ${user.email}?`)) return
+    reset.mutate(
+      { id: user.id, new_password: pwd },
+      {
+        onSuccess: () => {
+          if (alsoLogout) forceLogout.mutate(user.id)
+          setRevealed(pwd)
+        },
+      },
+    )
+  }
+
+  return (
+    <Modal title={`Reset password — ${user.email}`} onClose={onClose}>
+      {revealed ? (
+        <div className="space-y-3">
+          <p className="text-sm text-zinc-300">
+            Share this with <span className="font-medium text-zinc-100">{user.email}</span>{' '}
+            over a trusted channel. It won't be shown again.
+          </p>
+          <PlaintextReveal plaintext={revealed} onDismiss={onClose} />
+          {alsoLogout && (
+            <p className="text-xs text-zinc-500">
+              {forceLogout.isPending
+                ? 'Signing out existing sessions…'
+                : forceLogout.isSuccess
+                  ? `Existing sessions signed out (${(forceLogout.data as { revoked?: number } | undefined)?.revoked ?? 0}).`
+                  : 'Existing sessions will be signed out shortly.'}
+            </p>
+          )}
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <Field label="New password" hint="Min 8 chars.">
+            <input
+              type="password"
+              value={pwd}
+              onChange={(e) => setPwd(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+              className={modalInputClass}
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <input
+              type="password"
+              value={confirmPwd}
+              onChange={(e) => setConfirmPwd(e.target.value)}
+              autoComplete="new-password"
+              required
+              className={modalInputClass}
+            />
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={alsoLogout}
+              onChange={(e) => setAlsoLogout(e.target.checked)}
+            />
+            Also sign out all sessions
+          </label>
+
+          {localErr && <p className="text-sm text-rose-400">{localErr}</p>}
+          {reset.error && <p className="text-sm text-rose-400">{String(reset.error)}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={reset.isPending}
+              className="rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+            >
+              {reset.isPending ? 'Resetting…' : 'Reset password'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
   )
 }
 
@@ -1130,11 +1670,22 @@ function ErrorMsg({ message }: { message: string }) {
 const modalInputClass =
   'mt-1 w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none'
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+  size = 'md',
+}: {
+  title: string
+  onClose: () => void
+  children: React.ReactNode
+  size?: 'md' | 'lg' | 'xl'
+}) {
+  const maxW = size === 'xl' ? 'max-w-3xl' : size === 'lg' ? 'max-w-2xl' : 'max-w-md'
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl"
+        className={`w-full ${maxW} rounded-xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">

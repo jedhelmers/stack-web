@@ -45,8 +45,10 @@ import {
   X,
 } from 'lucide-react'
 import {
+  APIError,
   uploadAttachment,
   useArchiveChannel,
+  useChangeMyPassword,
   useChannels,
   useDeleteChannel,
   useDeleteMessage,
@@ -1106,6 +1108,7 @@ function UserSettingsModal({
   user: User
   onClose: () => void
 }) {
+  const [tab, setTab] = useState<'profile' | 'security'>('profile')
   const [displayName, setDisplayName] = useState(user.display_name)
   const [timezone, setTimezone] = useState(user.timezone)
   // Local preview URL while the upload is in flight; cleared once the server
@@ -1198,6 +1201,20 @@ function UserSettingsModal({
           </button>
         </header>
 
+        {/* tab strip ---------------------------------------------------------- */}
+        <div className="mb-4 flex gap-1 border-b border-zinc-800 text-sm">
+          <SettingsTabButton active={tab === 'profile'} onClick={() => setTab('profile')}>
+            Profile
+          </SettingsTabButton>
+          <SettingsTabButton active={tab === 'security'} onClick={() => setTab('security')}>
+            Security
+          </SettingsTabButton>
+        </div>
+
+        {tab === 'security' ? (
+          <ChangePasswordForm onCancel={onClose} />
+        ) : (
+        <>
         {/* avatar block ------------------------------------------------------ */}
         <div className="mb-5 flex items-center gap-4">
           <Avatar src={showAvatarSrc} name={displayName || user.display_name} size={64} />
@@ -1287,8 +1304,146 @@ function UserSettingsModal({
             {updateMe.isPending ? 'Saving…' : 'Save'}
           </button>
         </footer>
+        </>
+        )}
       </div>
     </div>
+  )
+}
+
+function SettingsTabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        '-mb-px border-b-2 px-3 py-2 transition-colors ' +
+        (active
+          ? 'border-sky-500 text-zinc-100'
+          : 'border-transparent text-zinc-400 hover:text-zinc-200')
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+// ChangePasswordForm — Security tab body. Validates new === confirm + length
+// ≥ 8 client-side; server rejects (401) on wrong current_password and (400)
+// on policy violations. Session cookie stays valid after a successful change.
+function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [localErr, setLocalErr] = useState<string | null>(null)
+  const change = useChangeMyPassword()
+
+  // Server-error mapping: 401 means current_password didn't match.
+  const wrongCurrent = change.error instanceof APIError && change.error.status === 401
+  const policyError = change.error instanceof APIError && change.error.status === 400
+  const otherError =
+    change.error && !wrongCurrent && !policyError ? String(change.error) : null
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLocalErr(null)
+    setSuccess(false)
+    if (next.length < 8) {
+      setLocalErr('New password must be at least 8 characters.')
+      return
+    }
+    if (next !== confirm) {
+      setLocalErr('New password and confirmation do not match.')
+      return
+    }
+    change.mutate(
+      { current_password: current, new_password: next },
+      {
+        onSuccess: () => {
+          setSuccess(true)
+          setCurrent('')
+          setNext('')
+          setConfirm('')
+        },
+      },
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-zinc-400">Current password</span>
+        <input
+          type="password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          autoComplete="current-password"
+          required
+          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-sky-500"
+        />
+        {wrongCurrent && (
+          <span className="mt-1 block text-xs text-rose-400">Current password is incorrect.</span>
+        )}
+      </label>
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-zinc-400">New password</span>
+        <input
+          type="password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          autoComplete="new-password"
+          minLength={8}
+          required
+          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-sky-500"
+        />
+        {policyError && (
+          <span className="mt-1 block text-xs text-rose-400">{String(change.error)}</span>
+        )}
+      </label>
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-zinc-400">Confirm new password</span>
+        <input
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          autoComplete="new-password"
+          required
+          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-sky-500"
+        />
+      </label>
+
+      {localErr && <div className="text-xs text-rose-400">{localErr}</div>}
+      {otherError && <div className="text-xs text-rose-400">{otherError}</div>}
+      {success && <div className="text-xs text-emerald-400">Password updated.</div>}
+
+      <footer className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={change.isPending}
+          className="rounded bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          {change.isPending ? 'Updating…' : 'Update password'}
+        </button>
+      </footer>
+    </form>
   )
 }
 
