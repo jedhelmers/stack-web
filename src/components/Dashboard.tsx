@@ -323,7 +323,13 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
         <Field label="Slug" hint="3-64 chars, lowercase letters/digits/hyphens">
           <input
             value={slug}
-            onChange={(e) => setSlug(e.target.value.toLowerCase())}
+            onChange={(e) => {
+              setSlug(e.target.value.toLowerCase())
+              // 409 slug_taken is bound to the previous slug — once the user
+              // types a different value, the message is stale and would
+              // false-positive against an attempt that hasn't been made yet.
+              if (create.error) create.reset()
+            }}
             required
             className={modalInputClass}
           />
