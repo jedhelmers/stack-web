@@ -247,10 +247,11 @@ function WorkspacesView() {
       <SearchInput value={q} onChange={setQ} placeholder="Search by slug or name…" />
       {isLoading ? <Loading /> : error ? <ErrorMsg message={String(error)} /> : (
         <Table
-          columns={['Slug', 'Name', 'Members', 'Channels', 'Messages', 'Last activity', 'Status', 'Actions']}
+          columns={['Slug', 'Name', 'Owners', 'Members', 'Channels', 'Messages', 'Last activity', 'Status', 'Actions']}
           rows={(data ?? []).map((w: OperatorWorkspace) => [
             <Mono>{w.slug}</Mono>,
             w.name,
+            <Owners workspace={w} />,
             w.member_count.toLocaleString(),
             w.channel_count.toLocaleString(),
             w.message_count.toLocaleString(),
@@ -304,7 +305,6 @@ function WorkspacesView() {
 function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
   const [slug, setSlug] = useState('')
   const [name, setName] = useState('')
-  const [ownerUserID, setOwnerUserID] = useState('')
   const [description, setDescription] = useState('')
   const create = useOpCreateWorkspace()
 
@@ -314,7 +314,7 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
         onSubmit={(e) => {
           e.preventDefault()
           create.mutate(
-            { slug, name, owner_user_id: ownerUserID, description: description || undefined },
+            { slug, name, description: description || undefined },
             { onSuccess: () => onClose() },
           )
         }}
@@ -331,15 +331,6 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} required className={modalInputClass} />
         </Field>
-        <Field label="Owner user ID" hint="UUID of the user who will own this workspace">
-          <input
-            value={ownerUserID}
-            onChange={(e) => setOwnerUserID(e.target.value)}
-            required
-            placeholder="00000000-0000-0000-0000-000000000000"
-            className={modalInputClass + ' font-mono text-xs'}
-          />
-        </Field>
         <Field label="Description (optional)">
           <textarea
             value={description}
@@ -348,6 +339,10 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
             className={modalInputClass}
           />
         </Field>
+        <p className="text-xs text-zinc-500">
+          You'll be added as the workspace owner. Use the Members modal to add
+          co-owners or transfer ownership afterward.
+        </p>
         {create.error && (
           <p className="text-sm text-rose-400">{formatOperatorError(create.error, 'workspace_create')}</p>
         )}
@@ -366,6 +361,42 @@ function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
       </form>
     </Modal>
   )
+}
+
+// Owners — renders the operator-list owner_user_ids[] column. 0 owners is a
+// red "no owner" pill (orphan state, possible now that the schema doesn't
+// hard-bind a single owner); exactly 1 owner resolves to that user's display
+// name from the workspace's members endpoint; >1 falls back to a count to
+// avoid a wall of names in the table. The members fetch piggybacks on the
+// same cache the Members modal uses, so opening that modal warms this cell.
+function Owners({ workspace }: { workspace: OperatorWorkspace }) {
+  const ids = workspace.owner_user_ids
+  if (ids.length === 0) {
+    return (
+      <span className="inline-block rounded border border-rose-900/50 bg-rose-950/30 px-2 py-0.5 text-xs text-rose-400">
+        No owner
+      </span>
+    )
+  }
+  if (ids.length === 1) {
+    return <OwnerName slug={workspace.slug} userId={ids[0]!} />
+  }
+  return <span className="text-xs text-zinc-300">{ids.length} owners</span>
+}
+
+function OwnerName({ slug, userId }: { slug: string; userId: string }) {
+  const members = useMembers(slug)
+  if (members.isLoading) {
+    return <span className="text-xs text-zinc-500">…</span>
+  }
+  const found = members.data?.find((m) => m.user_id === userId)
+  if (!found) {
+    // Fallback: show a UUID prefix so the row isn't blank when the members
+    // endpoint 403s (operator not a workspace member) or the owner has since
+    // been removed from the cached list.
+    return <Mono>{userId.slice(0, 8)}…</Mono>
+  }
+  return <span className="text-zinc-200" title={found.email}>{found.display_name}</span>
 }
 
 // ---- Workspace members modal ----------------------------------------------
