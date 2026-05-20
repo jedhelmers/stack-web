@@ -36,7 +36,7 @@
   "dependencies": {
     "@livekit/components-react": "^2.6.0",
     "@livekit/components-styles": "^1.1.0",
-    "@stack/client": "github:jedhelmers/stack-client#v0.2.6",
+    "@stack/client": "github:jedhelmers/stack-client#feature/huddle",
     "@tiptap/extension-link": "^3.23.4",
     "@tiptap/extension-placeholder": "^3.23.4",
     "@tiptap/extension-underline": "^3.23.4",
@@ -50,7 +50,9 @@
     "@tailwindcss/cli": "^4.0.0",
     "@tanstack/react-query": "^5.62.0",
     "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.3"
   }
