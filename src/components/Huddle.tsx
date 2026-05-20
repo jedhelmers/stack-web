@@ -39,7 +39,15 @@ import {
 import { Track, VideoPresets } from 'livekit-client'
 import type { RoomOptions } from 'livekit-client'
 import type { TrackReferenceOrPlaceholder } from '@livekit/components-core'
-import { useJoinHuddle, useLeaveHuddle, type HuddleJoinResponse } from '@stack/client'
+import {
+  useJoinHuddle,
+  useLeaveHuddle,
+  useActiveRecording,
+  useStartHuddleRecording,
+  useStopHuddleRecording,
+  type HuddleJoinResponse,
+  type HuddleRecording,
+} from '@stack/client'
 import {
   Mic,
   MicOff,
@@ -54,6 +62,8 @@ import {
   AudioLines,
   PictureInPicture,
   Pin,
+  Circle,
+  Disc,
 } from 'lucide-react'
 
 type Layout = 'grid' | 'spotlight' | 'speaker'
@@ -120,6 +130,7 @@ export function Huddle({ channelId, channelLabel, onClose }: Props) {
         )}
         {join.data && (
           <LiveKitJoined
+            channelId={channelId}
             data={join.data}
             onEntered={() => {
               enteredRef.current = true
@@ -136,10 +147,12 @@ export function Huddle({ channelId, channelLabel, onClose }: Props) {
 // re-mount it on every parent render. The room's lifecycle (connect →
 // publish tracks → disconnect) is expensive; keeping it stable matters.
 function LiveKitJoined({
+  channelId,
   data,
   onEntered,
   onDisconnect,
 }: {
+  channelId: string
   data: HuddleJoinResponse
   onEntered: () => void
   onDisconnect: () => void
@@ -156,7 +169,7 @@ function LiveKitJoined({
       options={huddleRoomOptions}
       className="flex h-full flex-col"
     >
-      <HuddleRoom onLeave={onDisconnect} />
+      <HuddleRoom channelId={channelId} onLeave={onDisconnect} />
       <RoomAudioRenderer />
     </LiveKitRoom>
   )
@@ -222,10 +235,16 @@ const huddleRoomOptions: RoomOptions = {
 
 // HuddleRoom owns the layout / pin / hide-self state. It must live
 // *inside* <LiveKitRoom> so the LiveKit hooks have a room context.
-function HuddleRoom({ onLeave }: { onLeave: () => void }) {
+function HuddleRoom({ channelId, onLeave }: { channelId: string; onLeave: () => void }) {
   const [layout, setLayout] = useState<Layout>('grid')
   const [pinned, setPinned] = useState<TileKey | null>(null)
   const [hideSelf, setHideSelf] = useState(false)
+
+  // Recording state — server-of-record. Watches the channel's recording
+  // list via stack-client; flips to non-null when any participant hits
+  // Record. Drives the REC banner + chime + voice line below.
+  const activeRecording = useActiveRecording(channelId, /* realtimeOpen */ true)
+  useRecordingConsentCue(activeRecording)
   // Camera tracks (with placeholders for participants without video),
   // plus all active screen-share tracks as extra tiles.
   const tracks = useTracks(
@@ -348,11 +367,117 @@ function HuddleRoom({ onLeave }: { onLeave: () => void }) {
         )}
 
         {hideSelf && localIdentity && <SelfPip tracks={tracks} localIdentity={localIdentity} />}
+
+        {/* REC banner — pinned to the top, above everything. Visible to
+            EVERY participant the moment a recording starts so consent is
+            unambiguous. See HUDDLE.md → consent model. */}
+        {activeRecording && <RecordingBanner recording={activeRecording} />}
       </div>
 
-      <ControlBar onLeave={onLeave} />
+      <ControlBar channelId={channelId} activeRecording={activeRecording} onLeave={onLeave} />
     </>
   )
+}
+
+// RecordingBanner — the visible half of the consent contract. The audible
+// half (chime + voice) is fired by useRecordingConsentCue on the same
+// activeRecording transition.
+function RecordingBanner({ recording: _r }: { recording: HuddleRecording }) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
+      <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-rose-600/95 px-3 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-300/70" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-200" />
+        </span>
+        REC · This conversation is being recorded
+      </div>
+    </div>
+  )
+}
+
+// useRecordingConsentCue — fires once per recording start, once per stop.
+// Uses Web Audio API for the chime (no asset shipping) and the browser's
+// SpeechSynthesis for the voice line. Both APIs require a prior user
+// gesture in some browsers; clicking the Huddle button on the way in is
+// usually enough to satisfy that.
+//
+// We key on recording.id, not just on null→non-null, so a fresh recording
+// after a previous one stops still triggers the cue.
+function useRecordingConsentCue(active: HuddleRecording | null) {
+  const lastRecordingIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = lastRecordingIdRef.current
+    const current = active?.id ?? null
+    if (previous === current) return
+    lastRecordingIdRef.current = current
+
+    if (current && !previous) {
+      // null → recording. Up-chime + voice line.
+      playChime('start')
+      speakConsentLine()
+    } else if (!current && previous) {
+      // recording → null. Down-chime.
+      playChime('stop')
+    } else if (current && previous && current !== previous) {
+      // Different recording (rare — a stop+start in quick succession).
+      // Treat as a new consent moment.
+      playChime('start')
+      speakConsentLine()
+    }
+  }, [active?.id])
+}
+
+function playChime(kind: 'start' | 'stop') {
+  try {
+    type WindowWithLegacyAudio = typeof window & {
+      webkitAudioContext?: typeof AudioContext
+    }
+    const w = window as WindowWithLegacyAudio
+    const AC = window.AudioContext ?? w.webkitAudioContext
+    if (!AC) return
+    const ctx = new AC()
+    const now = ctx.currentTime
+    // Two-tone bell: ascending on start, descending on stop. Short
+    // exponential envelope so it's a chime not a buzz.
+    const tones = kind === 'start' ? [660, 880] : [880, 660]
+    tones.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const t0 = now + i * 0.12
+      gain.gain.setValueAtTime(0, t0)
+      gain.gain.linearRampToValueAtTime(0.25, t0 + 0.01)
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25)
+      osc.connect(gain).connect(ctx.destination)
+      osc.start(t0)
+      osc.stop(t0 + 0.27)
+    })
+    // Close the context after the last tone finishes so we don't leak
+    // an AudioContext per recording.
+    window.setTimeout(() => ctx.close().catch(() => {}), 600)
+  } catch {
+    // SpeechSynthesis fallback handles the consent notification; if
+    // chime fails for any reason we still get the voice line.
+  }
+}
+
+function speakConsentLine() {
+  try {
+    if (!('speechSynthesis' in window)) return
+    const u = new SpeechSynthesisUtterance('This conversation is being recorded.')
+    u.rate = 1.05
+    u.pitch = 1.0
+    u.volume = 0.9
+    // Cancel anything in-flight so a stop+start in quick succession
+    // doesn't queue two overlapping utterances.
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(u)
+  } catch {
+    // Same fallback story: the visual banner is the legal anchor; voice
+    // is belt + suspenders.
+  }
 }
 
 // ─── Layout switcher ────────────────────────────────────────────────
@@ -661,13 +786,29 @@ function SelfPip({
 
 // ─── Control bar ────────────────────────────────────────────────────
 
-function ControlBar({ onLeave }: { onLeave: () => void }) {
+function ControlBar({
+  channelId,
+  activeRecording,
+  onLeave,
+}: {
+  channelId: string
+  activeRecording: HuddleRecording | null
+  onLeave: () => void
+}) {
   const participants = useParticipants()
   const { localParticipant } = useLocalParticipant()
 
   const mic = useTrackToggle({ source: Track.Source.Microphone })
   const cam = useTrackToggle({ source: Track.Source.Camera })
   const screen = useTrackToggle({ source: Track.Source.ScreenShare })
+
+  const startRec = useStartHuddleRecording(channelId)
+  const stopRec = useStopHuddleRecording(channelId)
+  const isRecording = activeRecording !== null
+  // Disable while the mutation's in flight OR the server-side recording
+  // is still 'processing' (egress finalizing). Stops a double-tap from
+  // racing the pipeline.
+  const recPending = startRec.isPending || stopRec.isPending
 
   const disconnect = useDisconnectButton({})
 
@@ -712,6 +853,25 @@ function ControlBar({ onLeave }: { onLeave: () => void }) {
           disabled={!localParticipant?.permissions?.canPublish}
         >
           <MonitorUp className="h-4 w-4" />
+        </CtrlButton>
+
+        <CtrlButton
+          label={isRecording ? 'Stop' : 'Record'}
+          // Red while recording so it reads as the "live"-state affordance,
+          // matching the REC banner color.
+          danger={isRecording}
+          pending={recPending}
+          onClick={() => {
+            if (isRecording) stopRec.mutate()
+            else startRec.mutate()
+          }}
+          title={
+            isRecording
+              ? 'Stop recording (transcript will be posted to the channel)'
+              : 'Start recording — all participants will be notified'
+          }
+        >
+          {isRecording ? <Disc className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
         </CtrlButton>
 
         <span className="h-6 w-px bg-zinc-800" />

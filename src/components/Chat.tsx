@@ -5,6 +5,7 @@ import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEdit
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
 import { Huddle } from './Huddle'
+import { isTranscriptPayload, TranscriptCard } from './Transcript'
 import { RightSidebar, useRightSidebar } from './RightSidebar'
 import { useModal } from './Modal'
 import {
@@ -3244,6 +3245,11 @@ function MessageItem({
           }}
           pending={editMut.isPending}
         />
+      ) : isTranscriptPayload(m.payload) ? (
+        // Server-authored transcript-ready message. Custom card with a
+        // "View" button that pops the segments dialog. We deliberately
+        // suppress the message's text body — the card subsumes it.
+        <TranscriptCard payload={m.payload} members={memberMap} />
       ) : m.payload ? (
         <div className="break-words">
           <MessageRender doc={m.payload as import('@tiptap/react').JSONContent} />
