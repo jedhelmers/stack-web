@@ -715,7 +715,7 @@ function Tile({
           </div>
         )}
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-zinc-950/80 via-zinc-950/40 to-transparent px-3 pb-2 pt-6">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 via-zinc-950/40 to-transparent px-3 pb-2 pt-6">
           <div className="flex min-w-0 items-center gap-1.5 text-sm text-zinc-100">
             {micMuted ? (
               <MicOff className="h-3.5 w-3.5 shrink-0 text-rose-400" />
@@ -775,7 +775,7 @@ function SelfPip({
           ) : (
             <Placeholder size="thumb" />
           )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-zinc-950/80 to-transparent px-2 pb-1.5 pt-4 text-[11px] text-zinc-200">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 to-transparent px-2 pb-1.5 pt-4 text-[11px] text-zinc-200">
             You
           </div>
         </div>

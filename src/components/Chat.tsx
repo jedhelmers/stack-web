@@ -3188,6 +3188,7 @@ function MessageItem({
       data-message-id={m.id}
       className={
         'message-row group relative -mx-2 flex gap-3 rounded px-2 py-1 transition-colors duration-700 hover:bg-zinc-900/40 ' +
+        (isOwn ? 'flex-row-reverse ' : '') +
         (highlighted
           ? 'bg-amber-500/10 ring-1 ring-amber-500/40'
           : selected
@@ -3214,8 +3215,8 @@ function MessageItem({
           className="mt-0.5 shrink-0"
         />
       )}
-      <div className="min-w-0 flex-1">
-      <div className="flex items-baseline gap-2">
+      <div className={'min-w-0 flex-1 ' + (isOwn ? 'text-right' : '')}>
+      <div className={'flex items-baseline gap-2 ' + (isOwn ? 'flex-row-reverse' : '')}>
         {onUserClick && m.user_id ? (
           <button
             type="button"
