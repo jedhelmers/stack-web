@@ -2762,6 +2762,15 @@ function MessageList({
       }
       if (ordered.length === 0) return
       e.preventDefault()
+      // Hand focus from the composer/editor to message-nav mode. Without
+      // this, the TipTap contentEditable keeps focus, so the next plain
+      // keystroke (e.g. 'p' to pin, 'e' to edit) gets swallowed as a
+      // character insert before our window handlers see it.
+      const active = document.activeElement as HTMLElement | null
+      if (active && (active.isContentEditable ||
+          active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        active.blur()
+      }
       const dir = e.key === 'ArrowDown' ? 1 : -1
       setSelectedId((cur) => {
         if (cur == null) {

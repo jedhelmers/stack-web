@@ -8,7 +8,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
-import { useEffect, useRef } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
 import { resolvePayloadRenderer } from '@stack/client'
 import { Mention } from './MentionMark'
 
@@ -62,6 +62,12 @@ export function useChatEditor(opts: EditorOpts = {}): Editor | null {
   // returns the Editor instance, so we read it via a ref that we update
   // immediately after construction below.
   const editorInstanceRef = useRef<Editor | null>(null)
+  // TipTap v3's useEditor no longer re-renders consumers on every transaction.
+  // Selection-only moves (e.g. cursor crossing into bold text) don't fire
+  // onUpdate, so the toolbar's editor.isActive('bold') reads would go stale.
+  // We tick this on selectionUpdate to force the consumer (and its toolbar)
+  // to re-render.
+  const [, bumpSelection] = useReducer((n: number) => n + 1, 0)
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -132,6 +138,9 @@ export function useChatEditor(opts: EditorOpts = {}): Editor | null {
     },
     onUpdate({ editor }) {
       opts.onUpdate?.(editor as Editor)
+    },
+    onSelectionUpdate() {
+      bumpSelection()
     },
   })
 
