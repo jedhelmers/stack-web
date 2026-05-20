@@ -12,8 +12,15 @@
 //     instead of a blank room.
 //   • On unmount or explicit close, call POST .../huddle/leave so the
 //     server marks us out and (if we were the last) ends the huddle.
+//
+// Layouts:
+//   - grid        — equal tiles (default for small rooms)
+//   - spotlight   — one main tile + side strip; user pins by clicking
+//   - speaker     — spotlight, but main auto-follows the active speaker
+//   Screen shares auto-promote to spotlight and pin themselves. Local
+//   participant can be hidden from the stage (PiP self preview instead).
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -23,6 +30,7 @@ import {
   useTracks,
   useParticipants,
   useLocalParticipant,
+  useSpeakingParticipants,
   useIsSpeaking,
   useIsMuted,
   useTrackToggle,
@@ -40,7 +48,19 @@ import {
   PhoneOff,
   X,
   User,
+  LayoutGrid,
+  Square,
+  AudioLines,
+  PictureInPicture,
+  Pin,
 } from 'lucide-react'
+
+type Layout = 'grid' | 'spotlight' | 'speaker'
+type TileKey = string // `${identity}:${source}`
+
+function tileKey(t: TrackReferenceOrPlaceholder): TileKey {
+  return `${t.participant.identity}:${t.source}`
+}
 
 type Props = {
   channelId: string
@@ -134,17 +154,20 @@ function LiveKitJoined({
       onDisconnected={onDisconnect}
       className="flex h-full flex-col"
     >
-      <HuddleStage />
+      <HuddleRoom onLeave={onDisconnect} />
       <RoomAudioRenderer />
-      <ControlBar onLeave={onDisconnect} />
     </LiveKitRoom>
   )
 }
 
-// HuddleStage — responsive grid of participant tiles.
-function HuddleStage() {
-  // One camera track ref per participant (placeholder if camera off), plus
-  // any active screen-shares as extra tiles.
+// HuddleRoom owns the layout / pin / hide-self state. It must live
+// *inside* <LiveKitRoom> so the LiveKit hooks have a room context.
+function HuddleRoom({ onLeave }: { onLeave: () => void }) {
+  const [layout, setLayout] = useState<Layout>('grid')
+  const [pinned, setPinned] = useState<TileKey | null>(null)
+  const [hideSelf, setHideSelf] = useState(false)
+  // Camera tracks (with placeholders for participants without video),
+  // plus all active screen-share tracks as extra tiles.
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -152,23 +175,276 @@ function HuddleStage() {
     ],
     { onlySubscribed: false },
   )
+  const { localParticipant } = useLocalParticipant()
+  const localIdentity = localParticipant?.identity
 
-  const count = tracks.length
-  const cols = gridCols(count)
+  // Active speakers for the Speaker layout. Keep the last non-empty
+  // speaker so the focus doesn't flicker back when everyone falls silent.
+  const speakers = useSpeakingParticipants()
+  const lastSpeakerRef = useRef<string | null>(null)
+  useEffect(() => {
+    const first = speakers.find((p) => p.identity !== localIdentity) ?? speakers[0]
+    if (first) lastSpeakerRef.current = first.identity
+  }, [speakers, localIdentity])
+
+  // Auto-spotlight on screen share. When a share appears we save the
+  // user's current layout and switch to spotlight+pin-share; when the
+  // share ends we restore. If the user manually picks a layout while a
+  // share is active, that becomes the new "saved" layout.
+  const firstShare = tracks.find((t) => t.source === Track.Source.ScreenShare)
+  const shareKey = firstShare ? tileKey(firstShare) : null
+  const savedLayoutRef = useRef<Layout | null>(null)
+  const autoPinShareRef = useRef<TileKey | null>(null)
+  useEffect(() => {
+    if (shareKey) {
+      // New share started.
+      if (autoPinShareRef.current !== shareKey) {
+        savedLayoutRef.current = layout
+        autoPinShareRef.current = shareKey
+        setLayout('spotlight')
+        setPinned(shareKey)
+      }
+    } else if (autoPinShareRef.current) {
+      // Share ended — restore.
+      const saved = savedLayoutRef.current ?? 'grid'
+      autoPinShareRef.current = null
+      savedLayoutRef.current = null
+      setLayout(saved)
+      setPinned((cur) => (cur && cur.endsWith(`:${Track.Source.ScreenShare}`) ? null : cur))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareKey])
+
+  // Manual layout change clears any auto-pin so the user's choice sticks.
+  const chooseLayout = (next: Layout) => {
+    setLayout(next)
+    if (next === 'grid') setPinned(null)
+  }
+
+  // Tile click → pin/unpin. Picking a new pin switches to spotlight.
+  const onPinToggle = (key: TileKey) => {
+    setPinned((cur) => {
+      if (cur === key) return null
+      return key
+    })
+    if (layout === 'grid') setLayout('spotlight')
+  }
+
+  // Stage tiles: hide local from the grid/strip when PiP-self is on.
+  const stageTiles = useMemo(
+    () => (hideSelf ? tracks.filter((t) => t.participant.identity !== localIdentity) : tracks),
+    [tracks, hideSelf, localIdentity],
+  )
+
+  // Resolve the focused (main) tile for spotlight/speaker layouts.
+  const focused: TrackReferenceOrPlaceholder | null = useMemo(() => {
+    if (layout === 'grid') return null
+    if (pinned) {
+      const t = stageTiles.find((x) => tileKey(x) === pinned)
+      if (t) return t
+    }
+    if (layout === 'speaker' && lastSpeakerRef.current) {
+      const t = stageTiles.find(
+        (x) =>
+          x.source === Track.Source.Camera &&
+          x.participant.identity === lastSpeakerRef.current,
+      )
+      if (t) return t
+    }
+    // Fallback: first remote camera, else first camera at all.
+    return (
+      stageTiles.find(
+        (x) => x.source === Track.Source.Camera && x.participant.identity !== localIdentity,
+      ) ??
+      stageTiles.find((x) => x.source === Track.Source.Camera) ??
+      stageTiles[0] ??
+      null
+    )
+  }, [layout, pinned, stageTiles, localIdentity])
+
+  const stripTiles = focused
+    ? stageTiles.filter((t) => tileKey(t) !== tileKey(focused))
+    : stageTiles
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto px-6 pt-6 pb-32">
+    <>
+      <div className="relative flex-1 min-h-0">
+        <LayoutSwitcher
+          layout={layout}
+          onChange={chooseLayout}
+          hideSelf={hideSelf}
+          onToggleHideSelf={() => setHideSelf((v) => !v)}
+        />
+
+        {layout === 'grid' ? (
+          <GridStage tiles={stageTiles} pinned={pinned} onPinToggle={onPinToggle} />
+        ) : (
+          <SpotlightStage
+            focused={focused}
+            strip={stripTiles}
+            pinned={pinned}
+            onPinToggle={onPinToggle}
+          />
+        )}
+
+        {hideSelf && localIdentity && <SelfPip tracks={tracks} localIdentity={localIdentity} />}
+      </div>
+
+      <ControlBar onLeave={onLeave} />
+    </>
+  )
+}
+
+// ─── Layout switcher ────────────────────────────────────────────────
+
+function LayoutSwitcher({
+  layout,
+  onChange,
+  hideSelf,
+  onToggleHideSelf,
+}: {
+  layout: Layout
+  onChange: (l: Layout) => void
+  hideSelf: boolean
+  onToggleHideSelf: () => void
+}) {
+  return (
+    <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/80 p-1 shadow-lg backdrop-blur">
+      <SegBtn label="Grid" title="Grid" active={layout === 'grid'} onClick={() => onChange('grid')}>
+        <LayoutGrid className="h-4 w-4" />
+      </SegBtn>
+      <SegBtn
+        label="Spotlight"
+        title="Spotlight"
+        active={layout === 'spotlight'}
+        onClick={() => onChange('spotlight')}
+      >
+        <Square className="h-4 w-4" />
+      </SegBtn>
+      <SegBtn
+        label="Speaker"
+        title="Speaker (auto-follow)"
+        active={layout === 'speaker'}
+        onClick={() => onChange('speaker')}
+      >
+        <AudioLines className="h-4 w-4" />
+      </SegBtn>
+      <span className="mx-1 h-5 w-px bg-zinc-800" />
+      <SegBtn
+        label="Self-PiP"
+        title={hideSelf ? 'Show self in stage' : 'Hide self (picture-in-picture)'}
+        active={hideSelf}
+        onClick={onToggleHideSelf}
+      >
+        <PictureInPicture className="h-4 w-4" />
+      </SegBtn>
+    </div>
+  )
+}
+
+function SegBtn({
+  children,
+  label,
+  title,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode
+  label: string
+  title: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={label}
+      aria-pressed={active}
+      className={[
+        'flex h-8 items-center justify-center rounded-full px-2.5 text-xs font-medium transition-colors',
+        active
+          ? 'bg-zinc-100 text-zinc-900'
+          : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100',
+      ].join(' ')}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ─── Stages ─────────────────────────────────────────────────────────
+
+function GridStage({
+  tiles,
+  pinned,
+  onPinToggle,
+}: {
+  tiles: TrackReferenceOrPlaceholder[]
+  pinned: TileKey | null
+  onPinToggle: (k: TileKey) => void
+}) {
+  const cols = gridCols(tiles.length)
+  return (
+    <div className="absolute inset-0 overflow-auto px-6 pt-6 pb-32">
       <div
-        className="mx-auto grid h-full w-full max-w-6xl gap-4"
+        className="mx-auto grid w-full max-w-6xl gap-4"
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       >
-        {tracks.map((trackRef) => (
+        {tiles.map((t) => (
           <Tile
-            key={`${trackRef.participant.identity}:${trackRef.source}:${trackRef.publication?.trackSid ?? 'placeholder'}`}
-            trackRef={trackRef}
+            key={tileKey(t)}
+            trackRef={t}
+            pinned={pinned === tileKey(t)}
+            onPinToggle={onPinToggle}
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+function SpotlightStage({
+  focused,
+  strip,
+  pinned,
+  onPinToggle,
+}: {
+  focused: TrackReferenceOrPlaceholder | null
+  strip: TrackReferenceOrPlaceholder[]
+  pinned: TileKey | null
+  onPinToggle: (k: TileKey) => void
+}) {
+  return (
+    <div className="absolute inset-0 flex gap-4 px-6 pt-6 pb-32">
+      <div className="min-w-0 flex-1">
+        {focused ? (
+          <Tile
+            trackRef={focused}
+            pinned={pinned === tileKey(focused)}
+            onPinToggle={onPinToggle}
+            size="hero"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center rounded-xl bg-zinc-900 text-sm text-zinc-500">
+            No one here yet
+          </div>
+        )}
+      </div>
+      {strip.length > 0 && (
+        <div className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto pr-1">
+          {strip.map((t) => (
+            <Tile
+              key={tileKey(t)}
+              trackRef={t}
+              pinned={pinned === tileKey(t)}
+              onPinToggle={onPinToggle}
+              size="thumb"
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -180,9 +456,19 @@ function gridCols(n: number): number {
   return 4
 }
 
-// Tile — one participant card. Video if available; otherwise avatar +
-// name + mic indicator. Glowing ring while speaking.
-function Tile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+// ─── Tile ───────────────────────────────────────────────────────────
+
+function Tile({
+  trackRef,
+  pinned,
+  onPinToggle,
+  size = 'normal',
+}: {
+  trackRef: TrackReferenceOrPlaceholder
+  pinned: boolean
+  onPinToggle: (k: TileKey) => void
+  size?: 'normal' | 'thumb' | 'hero'
+}) {
   const isScreenShare = trackRef.source === Track.Source.ScreenShare
   const hasVideo = !!trackRef.publication && !trackRef.publication.isMuted
   const isSpeaking = useIsSpeaking(trackRef.participant)
@@ -195,34 +481,52 @@ function Tile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
   }
   const micMuted = useIsMuted(micRef)
 
+  const sizing =
+    size === 'hero'
+      ? 'h-full w-full'
+      : size === 'thumb'
+        ? 'aspect-video w-full'
+        : 'aspect-video w-full'
+
   return (
     <ParticipantContextIfNeeded participant={trackRef.participant}>
       <div
+        onClick={() => onPinToggle(tileKey(trackRef))}
         className={[
-          'group relative aspect-video overflow-hidden rounded-xl bg-zinc-900',
+          'group relative cursor-pointer overflow-hidden rounded-xl bg-zinc-900',
           'shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]',
           'transition-shadow duration-150',
+          sizing,
           isSpeaking && !isScreenShare
             ? 'ring-2 ring-emerald-500/80 ring-offset-2 ring-offset-zinc-950'
             : '',
+          pinned ? 'ring-2 ring-sky-500/70 ring-offset-2 ring-offset-zinc-950' : '',
         ].join(' ')}
+        title={pinned ? 'Click to unpin' : 'Click to pin to spotlight'}
       >
         {hasVideo ? (
           <VideoTrack
             trackRef={trackRef as never}
             className={
-              isScreenShare
+              isScreenShare || size === 'hero'
                 ? 'h-full w-full object-contain'
                 : 'h-full w-full object-cover'
             }
           />
         ) : (
-          <Placeholder />
+          <Placeholder size={size} />
         )}
 
         {isScreenShare && (
           <div className="absolute left-3 top-3 rounded-md bg-zinc-950/70 px-2 py-1 text-[11px] font-medium text-zinc-200 backdrop-blur">
             Screen
+          </div>
+        )}
+
+        {pinned && (
+          <div className="absolute right-3 top-3 flex items-center gap-1 rounded-md bg-sky-500/15 px-2 py-1 text-[11px] font-medium text-sky-300 backdrop-blur">
+            <Pin className="h-3 w-3" />
+            Pinned
           </div>
         )}
 
@@ -241,19 +545,62 @@ function Tile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
   )
 }
 
-function Placeholder() {
+function Placeholder({ size }: { size: 'normal' | 'thumb' | 'hero' }) {
+  const ringSize =
+    size === 'hero' ? 'h-32 w-32' : size === 'thumb' ? 'h-12 w-12' : 'h-20 w-20'
+  const iconSize =
+    size === 'hero' ? 'h-16 w-16' : size === 'thumb' ? 'h-6 w-6' : 'h-10 w-10'
   return (
     <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
-      <div className="flex h-20 w-20 items-center justify-center rounded-full bg-zinc-700/60 text-zinc-300">
-        <User className="h-10 w-10" />
+      <div
+        className={`flex ${ringSize} items-center justify-center rounded-full bg-zinc-700/60 text-zinc-300`}
+      >
+        <User className={iconSize} />
       </div>
     </div>
   )
 }
 
-// ControlBar — floating pill at the bottom-center. Mic / camera / screen
-// share toggles + leave button. Buttons are circular with a label below
-// (Slack/Discord huddle style).
+// ─── Self picture-in-picture ────────────────────────────────────────
+
+function SelfPip({
+  tracks,
+  localIdentity,
+}: {
+  tracks: TrackReferenceOrPlaceholder[]
+  localIdentity: string
+}) {
+  // Prefer the local camera track; if camera is off, use the placeholder.
+  const selfCam =
+    tracks.find(
+      (t) =>
+        t.participant.identity === localIdentity && t.source === Track.Source.Camera,
+    ) ?? null
+  if (!selfCam) return null
+  const hasVideo = !!selfCam.publication && !selfCam.publication.isMuted
+  return (
+    <div className="pointer-events-none absolute bottom-28 right-6 z-10 w-56">
+      <ParticipantContextIfNeeded participant={selfCam.participant}>
+        <div className="relative aspect-video overflow-hidden rounded-lg bg-zinc-900 shadow-xl shadow-black/40 ring-1 ring-zinc-800">
+          {hasVideo ? (
+            <VideoTrack
+              trackRef={selfCam as never}
+              className="h-full w-full -scale-x-100 object-cover"
+            />
+          ) : (
+            <Placeholder size="thumb" />
+          )}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-zinc-950/80 to-transparent px-2 pb-1.5 pt-4 text-[11px] text-zinc-200">
+            You
+          </div>
+        </div>
+      </ParticipantContextIfNeeded>
+    </div>
+  )
+}
+
+// ─── Control bar ────────────────────────────────────────────────────
+
 function ControlBar({ onLeave }: { onLeave: () => void }) {
   const participants = useParticipants()
   const { localParticipant } = useLocalParticipant()

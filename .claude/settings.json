@@ -14,7 +14,10 @@
       "Bash(grep -nA 2 \"owner_user_ids\" /Users/jedhelmers/Documents/GitHub/stack-web/node_modules/@stack/client/src/client.ts)",
       "Bash(grep -nA 12 \"type OperatorWorkspace\" /Users/jedhelmers/Documents/GitHub/stack-web/node_modules/@stack/client/dist/client.d.ts)",
       "Bash(grep -nA 8 \"type Workspace \" /Users/jedhelmers/Documents/GitHub/stack-web/node_modules/@stack/client/dist/client.d.ts)",
-      "Bash(grep -nA 8 \"useOpCreateWorkspace\" /Users/jedhelmers/Documents/GitHub/stack-web/node_modules/@stack/client/dist/hooks.d.ts)"
+      "Bash(grep -nA 8 \"useOpCreateWorkspace\" /Users/jedhelmers/Documents/GitHub/stack-web/node_modules/@stack/client/dist/hooks.d.ts)",
+      "Bash(grep -iE \"^\\(layout|grid|user|pin|maximize|mic|volume|audio|video|monitor|square|sidebar|columns|panel|focus|sun|target\\).*\\\\.js$\")",
+      "Bash(awk '{print $3}')",
+      "Bash(grep -iE \"^\\(LayoutGrid|Grid|GridIcon|PictureInPicture|Maximize|Maximize2|Square|Pin|PinOff|UserRound|UserMinus|UserX|AudioLines|Volume2|Speech|Sidebar|Columns|Columns2|Columns3|Columns4|PanelLeft|PanelRight|PanelTop|PanelBottom|Focus|Eye|EyeOff|MicVocal|Mic2|MonitorPlay\\)$\")"
     ]
   }
 }
