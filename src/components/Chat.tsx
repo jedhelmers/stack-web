@@ -4,6 +4,7 @@ import type { Editor } from '@tiptap/react'
 import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
+import { Huddle } from './Huddle'
 import { RightSidebar, useRightSidebar } from './RightSidebar'
 import { useModal } from './Modal'
 import {
@@ -27,6 +28,7 @@ import {
   List,
   ListOrdered,
   MessageSquare,
+  Headphones,
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
@@ -2519,6 +2521,12 @@ function ChannelView({
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
   const isDM = channel.kind === 'dm' || channel.kind === 'group_dm'
   const typingUserIDs = useTypingState(channel.id, currentUserID)
+  // Huddle overlay state. Local to the channel view — closing leaves the
+  // huddle (the Huddle component fires LEAVE on unmount). Resets when the
+  // user navigates to a different channel because this whole component
+  // remounts with a fresh channel id.
+  const [huddleOpen, setHuddleOpen] = useState(false)
+  const channelLabel = `${isDM ? '@ ' : '# '}${channel.slug ?? channel.name ?? '(dm)'}`
   return (
     <>
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
@@ -2532,6 +2540,14 @@ function ChannelView({
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setHuddleOpen(true)}
+            title="Start or join huddle"
+            className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            <Headphones className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={onOpenPins}
@@ -2549,6 +2565,13 @@ function ChannelView({
           )}
         </div>
       </header>
+      {huddleOpen && (
+        <Huddle
+          channelId={channel.id}
+          channelLabel={channelLabel}
+          onClose={() => setHuddleOpen(false)}
+        />
+      )}
 
       <MessageList
         channelId={channel.id}
