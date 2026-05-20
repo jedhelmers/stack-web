@@ -5,7 +5,15 @@ import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEdit
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
 import { Huddle } from './Huddle'
-import { isTranscriptPayload, TranscriptCard } from './Transcript'
+import {
+  isTranscriptPayload,
+  isHuddleStartedPayload,
+  TranscriptCard,
+  HuddleCard,
+  RecordingsPanel,
+  OPEN_HUDDLE_EVENT,
+  type OpenHuddleEventDetail,
+} from './Transcript'
 import { RightSidebar, useRightSidebar } from './RightSidebar'
 import { useModal } from './Modal'
 import {
@@ -568,6 +576,26 @@ export function Chat({
                     onJump={(messageId) =>
                       handleSelectChannel(activeChannel.id, messageId)
                     }
+                  />
+                ),
+              })
+            }}
+            onOpenRecordings={() => {
+              if (!activeChannel) return
+              const channelName =
+                activeChannel.slug ?? activeChannel.name ?? 'channel'
+              const isDM =
+                activeChannel.kind === 'dm' || activeChannel.kind === 'group_dm'
+              sidebar.open({
+                id: `recordings:${activeChannel.id}`,
+                title: isDM ? 'Recordings' : `Recordings in #${channelName}`,
+                body: (
+                  <RecordingsPanel
+                    channelId={activeChannel.id}
+                    members={
+                      new Map((members ?? []).map((m) => [m.user_id, m]))
+                    }
+                    realtimeOpen={rtState === 'open'}
                   />
                 ),
               })
@@ -2504,6 +2532,7 @@ function ChannelView({
   onChannelGone,
   onOpenThread,
   onOpenPins,
+  onOpenRecordings,
   onUserClick,
 }: {
   channel: Channel
@@ -2517,6 +2546,7 @@ function ChannelView({
   onChannelGone: () => void
   onOpenThread: (rootId: string) => void
   onOpenPins: () => void
+  onOpenRecordings: () => void
   onUserClick: (userId: string) => void
 }) {
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
@@ -2527,6 +2557,18 @@ function ChannelView({
   // user navigates to a different channel because this whole component
   // remounts with a fresh channel id.
   const [huddleOpen, setHuddleOpen] = useState(false)
+  // Listen for HuddleCard's "Join" button (and any future dispatcher) —
+  // see OPEN_HUDDLE_EVENT in Transcript.tsx. Scoped to this channel: the
+  // event carries a channelId and we ignore mismatches in case the user
+  // navigated away between dispatch and handle.
+  useEffect(() => {
+    function onOpen(e: Event) {
+      const detail = (e as CustomEvent<OpenHuddleEventDetail>).detail
+      if (detail?.channelId === channel.id) setHuddleOpen(true)
+    }
+    window.addEventListener(OPEN_HUDDLE_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_HUDDLE_EVENT, onOpen)
+  }, [channel.id])
   const channelLabel = `${isDM ? '@ ' : '# '}${channel.slug ?? channel.name ?? '(dm)'}`
   return (
     <>
@@ -2548,6 +2590,14 @@ function ChannelView({
             className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
           >
             <Headphones className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenRecordings}
+            title="Past huddle recordings"
+            className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            <Mic className="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -3274,6 +3324,12 @@ function MessageItem({
         // "View" button that pops the segments dialog. We deliberately
         // suppress the message's text body — the card subsumes it.
         <TranscriptCard payload={m.payload} members={memberMap} />
+      ) : isHuddleStartedPayload(m.payload) ? (
+        // Server posts this when a huddle is created. The card pulls live
+        // state itself (via useHuddle) so it can flip "Join" vs "Ended"
+        // without prop drilling. Join button dispatches a window event
+        // the channel shell listens for — see OPEN_HUDDLE_EVENT.
+        <HuddleCard payload={m.payload} channelId={channelId} />
       ) : m.payload ? (
         <div className="break-words">
           <MessageRender doc={m.payload as import('@tiptap/react').JSONContent} />
