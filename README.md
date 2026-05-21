@@ -1,15 +1,15 @@
-# stack-web
+# switchboard-web
 
-Drop-in React screens for the [Stack](https://github.com/jedhelmers/stack-client) chat platform. Compose `<Chat />`, `<Dashboard />`, `<Login />`, and `<InviteAccept />` into your own app — bring your own router, auth gating, and query client.
+Drop-in React screens for the [SwitchBoard](https://github.com/jedhelmers/switchboard-client) chat platform. Compose `<Chat />`, `<Dashboard />`, `<Login />`, and `<InviteAccept />` into your own app — bring your own router, auth gating, and query client.
 
-The companion data layer is [`@stack/client`](https://github.com/jedhelmers/stack-client), which provides the typed REST client, React Query hooks, and realtime patcher. `stack-web` depends on it and re-exports nothing from it — import data hooks (`useMe`, `useChannels`, …) directly from `@stack/client`.
+The companion data layer is [`@switchboard/client`](https://github.com/jedhelmers/switchboard-client), which provides the typed REST client, React Query hooks, and realtime patcher. `switchboard-web` depends on it and re-exports nothing from it — import data hooks (`useMe`, `useChannels`, …) directly from `@switchboard/client`.
 
 ## Install
 
 ```sh
 npm install \
-  github:jedhelmers/stack-web#v0.1.0 \
-  github:jedhelmers/stack-client#v0.2.3 \
+  github:jedhelmers/switchboard-web#v0.1.0 \
+  github:jedhelmers/switchboard-client#v0.2.3 \
   react react-dom @tanstack/react-query
 ```
 
@@ -21,17 +21,17 @@ The `prepare` script builds `lib/` automatically on install (both JS via `tsc` a
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { configure, useMe } from '@stack/client'
+import { configure, useMe } from '@switchboard/client'
 import {
   Chat,
   ModalProvider,
   RightSidebarProvider,
   Modal,
   installBuiltinPlugins,
-} from 'stack-web'
-import 'stack-web/style.css'
+} from 'switchboard-web'
+import 'switchboard-web/style.css'
 
-// Point @stack/client at your backend (defaults assume same-origin /v1/...).
+// Point @switchboard/client at your backend (defaults assume same-origin /v1/...).
 configure({ baseURL: 'https://chat.example.com' })
 
 // Register built-in slash commands + payload renderers (e.g. /giphy).
@@ -118,7 +118,7 @@ Operator-only admin surface (stats, workspaces, channels, users, parent apps + A
 
 ### `<Login />`
 
-Email + password sign-in form. Posts to `useLogin()` from `@stack/client`; on success the `/me` query repopulates and your auth gate re-renders.
+Email + password sign-in form. Posts to `useLogin()` from `@switchboard/client`; on success the `/me` query repopulates and your auth gate re-renders.
 
 ```tsx
 <Login />
@@ -140,7 +140,7 @@ Self-serve account creation from an invite token (typically the `:token` segment
 Import the prebuilt stylesheet **once** at app startup:
 
 ```tsx
-import 'stack-web/style.css'
+import 'switchboard-web/style.css'
 ```
 
 It's a compiled Tailwind v4 build that includes every class used by the screens. The file also defines a few app-shell rules — most notably `html, body, #root { height: 100%; overflow: hidden }` — because the chat shell expects a viewport-sized container that doesn't scroll (every scroll lives inside a designated panel). If you mount the chat inside a non-fullscreen container, override those rules in your own CSS after the import.
@@ -149,14 +149,14 @@ The bundle uses plain Tailwind utility classes (`bg-zinc-950`, `text-zinc-100`, 
 
 ### Theming
 
-Every colour utility used inside the library reads through a semantic `--stack-*` CSS variable. The default values are dark with a sky/emerald/amber/rose accent set — they're listed in `src/index.css` and re-exported as `defaultDarkTheme` from the package.
+Every colour utility used inside the library reads through a semantic `--switchboard-*` CSS variable. The default values are dark with a sky/emerald/amber/rose accent set — they're listed in `src/index.css` and re-exported as `defaultDarkTheme` from the package.
 
 #### Overrides at runtime
 
 Use `applyTheme()` from a host that flips themes (system preference, brand picker, multi-tenant skinning, …). Only the keys you pass are written, so partial overrides are fine.
 
 ```tsx
-import { applyTheme, resetTheme, defaultDarkTheme } from 'stack-web'
+import { applyTheme, resetTheme, defaultDarkTheme } from 'switchboard-web'
 
 // Recolour just the primary accent and the body text.
 applyTheme({
@@ -191,28 +191,28 @@ resetTheme()
 | `info` | `400,900,950` | Secondary accent / badges | Tailwind `violet-*` |
 | `highlight` | `400` | Inline marks in the rich-text editor | Tailwind `orange-400` |
 
-The components keep using `bg-zinc-950`, `text-rose-400`, etc. — those classes resolve to `var(--color-zinc-950)`, which is rewired in `src/index.css` to point at `--stack-neutral-950`. Override `--stack-*` (via `applyTheme()` or your own CSS) and every utility follows.
+The components keep using `bg-zinc-950`, `text-rose-400`, etc. — those classes resolve to `var(--color-zinc-950)`, which is rewired in `src/index.css` to point at `--switchboard-neutral-950`. Override `--switchboard-*` (via `applyTheme()` or your own CSS) and every utility follows.
 
 If you'd rather set the variables in plain CSS:
 
 ```css
 :root {
-  --stack-neutral-950: #0b0d12;
-  --stack-accent-600: #3b82f6;
-  --stack-text-body: #f5f7fb;
+  --switchboard-neutral-950: #0b0d12;
+  --switchboard-accent-600: #3b82f6;
+  --switchboard-text-body: #f5f7fb;
 }
 ```
 
 ## Plugins
 
-Slash commands and payload renderers are registered globally via `@stack/client`'s plugin registry. `stack-web` ships one optional plugin (`/giphy`) and an `installBuiltinPlugins()` helper:
+Slash commands and payload renderers are registered globally via `@switchboard/client`'s plugin registry. `switchboard-web` ships one optional plugin (`/giphy`) and an `installBuiltinPlugins()` helper:
 
 ```tsx
-import { installBuiltinPlugins } from 'stack-web'
+import { installBuiltinPlugins } from 'switchboard-web'
 installBuiltinPlugins()  // registers /giphy + the GiphyBlock payload renderer
 ```
 
-To register a custom command, use `registerSlashCommand` / `registerPayloadRenderer` from `@stack/client` directly. See [`src/plugins/giphy.tsx`](src/plugins/giphy.tsx) for a worked example.
+To register a custom command, use `registerSlashCommand` / `registerPayloadRenderer` from `@switchboard/client` directly. See [`src/plugins/giphy.tsx`](src/plugins/giphy.tsx) for a worked example.
 
 ## What's exported
 
@@ -225,9 +225,9 @@ To register a custom command, use `registerSlashCommand` / `registerPayloadRende
 | `Mention`, `extractMentionsFromDoc`, `docMentionsUser`, `MentionAttrs`, `MentionKind` | Mention mark + helpers |
 | `GiphyPicker`, `GiphyPickResult` | Standalone Giphy search component |
 | `installBuiltinPlugins`, `installGiphy` | Plugin registration helpers |
-| `applyTheme`, `resetTheme`, `defaultDarkTheme`, `StackPalette`, `StackPaletteOverrides` | Runtime palette controls — see [Theming](#theming) |
+| `applyTheme`, `resetTheme`, `defaultDarkTheme`, `SwitchBoardPalette`, `SwitchBoardPaletteOverrides` | Runtime palette controls — see [Theming](#theming) |
 
-Data hooks, the REST client, types like `User`/`Channel`/`Message`, and the realtime layer all live in `@stack/client` — import them from there.
+Data hooks, the REST client, types like `User`/`Channel`/`Message`, and the realtime layer all live in `@switchboard/client` — import them from there.
 
 ## Development
 
@@ -238,14 +238,14 @@ npm run build       # tsc emit -> lib/ + tailwind -> lib/style.css
 npm run clean       # rm -rf lib
 ```
 
-There's no dev server in this repo any more — `stack-web` is a library. Work on it from inside a consumer app via `npm link`, or run an in-repo example.
+There's no dev server in this repo any more — `switchboard-web` is a library. Work on it from inside a consumer app via `npm link`, or run an in-repo example.
 
 ## Versioning
 
 Tagged releases live on GitHub (`vX.Y.Z`). Pin a tag in your consumer's `package.json`:
 
 ```json
-"stack-web": "github:jedhelmers/stack-web#v0.1.0"
+"switchboard-web": "github:jedhelmers/switchboard-web#v0.1.0"
 ```
 
 To cut a new release: bump `version` in `package.json`, commit, `git tag vX.Y.Z`, `git push --tags`. Consumers re-run `npm install` to pull the new tag; the `prepare` script rebuilds `lib/` on their machine.

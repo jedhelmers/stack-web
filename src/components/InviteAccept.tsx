@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAcceptInvite, APIError } from '@stack/client'
+import { useAcceptInvite, APIError } from '@switchboard/client'
 
 export function InviteAccept({
   token,

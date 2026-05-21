@@ -1,5 +1,5 @@
 // Public entry. Consumers compose these screens into their own router and
-// auth shell. The matching CSS is at `stack-web/style.css` — import once at
+// auth shell. The matching CSS is at `switchboard-web/style.css` — import once at
 // app startup.
 
 export { Chat } from './components/Chat'
@@ -38,6 +38,6 @@ export {
   applyTheme,
   resetTheme,
   defaultDarkTheme,
-  type StackPalette,
-  type StackPaletteOverrides,
+  type SwitchBoardPalette,
+  type SwitchBoardPaletteOverrides,
 } from './theme'

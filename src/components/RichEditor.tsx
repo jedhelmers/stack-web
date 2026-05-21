@@ -9,7 +9,7 @@ import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useEffect, useReducer, useRef } from 'react'
-import { resolvePayloadRenderer } from '@stack/client'
+import { resolvePayloadRenderer } from '@switchboard/client'
 import { Mention } from './MentionMark'
 
 const editorClasses = [

@@ -4,15 +4,15 @@ import type { Editor } from '@tiptap/react'
 import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
-import { Huddle } from './Huddle'
+import { Jam } from './Jam'
 import {
   isTranscriptPayload,
-  isHuddleStartedPayload,
+  isJamStartedPayload,
   TranscriptCard,
-  HuddleCard,
+  JamCard,
   RecordingsPanel,
-  OPEN_HUDDLE_EVENT,
-  type OpenHuddleEventDetail,
+  OPEN_JAM_EVENT,
+  type OpenJamEventDetail,
 } from './Transcript'
 import { RightSidebar, useRightSidebar } from './RightSidebar'
 import { useModal } from './Modal'
@@ -105,7 +105,7 @@ import {
   setCurrentUser,
   type MessagesInfiniteData,
   type UnreadMap,
-} from '@stack/client'
+} from '@switchboard/client'
 import type {
   AttachmentFile,
   Channel,
@@ -115,7 +115,7 @@ import type {
   Member,
   Message,
   User,
-} from '@stack/client'
+} from '@switchboard/client'
 
 type Props = {
   user: User
@@ -400,7 +400,7 @@ export function Chat({
           totalUnread={mentionCounts?.total ?? 0}
           onClick={openMentionsPanel}
         />
-        <MembersAvatarStack members={members} onClick={openMembersModal} />
+        <MembersAvatarSwitchBoard members={members} onClick={openMembersModal} />
       </header>
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {!leftNavOpen && (
@@ -956,10 +956,10 @@ function walkText(node: { content?: unknown[]; text?: string }, out: string[]) {
   }
 }
 
-// MembersAvatarStack — header-level summary of workspace members. Renders
+// MembersAvatarSwitchBoard — header-level summary of workspace members. Renders
 // up to MAX_VISIBLE overlapping avatars, then a "+N" pill, then opens the
 // full searchable list in a modal on click.
-function MembersAvatarStack({
+function MembersAvatarSwitchBoard({
   members,
   onClick,
 }: {
@@ -2553,22 +2553,22 @@ function ChannelView({
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
   const isDM = channel.kind === 'dm' || channel.kind === 'group_dm'
   const typingUserIDs = useTypingState(channel.id, currentUserID)
-  // Huddle overlay state. Local to the channel view — closing leaves the
-  // huddle (the Huddle component fires LEAVE on unmount). Resets when the
+  // Jam overlay state. Local to the channel view — closing leaves the
+  // jam (the Jam component fires LEAVE on unmount). Resets when the
   // user navigates to a different channel because this whole component
   // remounts with a fresh channel id.
-  const [huddleOpen, setHuddleOpen] = useState(false)
-  // Listen for HuddleCard's "Join" button (and any future dispatcher) —
-  // see OPEN_HUDDLE_EVENT in Transcript.tsx. Scoped to this channel: the
+  const [jamOpen, setJamOpen] = useState(false)
+  // Listen for JamCard's "Join" button (and any future dispatcher) —
+  // see OPEN_JAM_EVENT in Transcript.tsx. Scoped to this channel: the
   // event carries a channelId and we ignore mismatches in case the user
   // navigated away between dispatch and handle.
   useEffect(() => {
     function onOpen(e: Event) {
-      const detail = (e as CustomEvent<OpenHuddleEventDetail>).detail
-      if (detail?.channelId === channel.id) setHuddleOpen(true)
+      const detail = (e as CustomEvent<OpenJamEventDetail>).detail
+      if (detail?.channelId === channel.id) setJamOpen(true)
     }
-    window.addEventListener(OPEN_HUDDLE_EVENT, onOpen)
-    return () => window.removeEventListener(OPEN_HUDDLE_EVENT, onOpen)
+    window.addEventListener(OPEN_JAM_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_JAM_EVENT, onOpen)
   }, [channel.id])
   const channelLabel = `${isDM ? '@ ' : '# '}${channel.slug ?? channel.name ?? '(dm)'}`
   return (
@@ -2586,8 +2586,8 @@ function ChannelView({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setHuddleOpen(true)}
-            title="Start or join huddle"
+            onClick={() => setJamOpen(true)}
+            title="Start or join jam"
             className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
           >
             <Headphones className="h-4 w-4" />
@@ -2595,7 +2595,7 @@ function ChannelView({
           <button
             type="button"
             onClick={onOpenRecordings}
-            title="Past huddle recordings"
+            title="Past jam recordings"
             className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
           >
             <Mic className="h-4 w-4" />
@@ -2617,11 +2617,11 @@ function ChannelView({
           )}
         </div>
       </header>
-      {huddleOpen && (
-        <Huddle
+      {jamOpen && (
+        <Jam
           channelId={channel.id}
           channelLabel={channelLabel}
-          onClose={() => setHuddleOpen(false)}
+          onClose={() => setJamOpen(false)}
         />
       )}
 
@@ -2818,12 +2818,12 @@ function MessageList({
         : -1
       // ArrowDown past the most recent message exits message-nav and hands
       // focus back to the composer. The Composer subscribes to
-      // `stack:focus-composer` and calls editor.commands.focus() on match.
+      // `switchboard:focus-composer` and calls editor.commands.focus() on match.
       if (dir === 1 && curIdx === ordered.length - 1) {
         e.preventDefault()
         setSelectedId(null)
         window.dispatchEvent(
-          new CustomEvent('stack:focus-composer', {
+          new CustomEvent('switchboard:focus-composer', {
             detail: { channelId, mode: 'channel' },
           }),
         )
@@ -3253,7 +3253,7 @@ function MessageItem({
   // "Mentions me" check — true when the message has a mention notification
   // targeting the current user, *or* a channel-wide kind (which fans out
   // to me too). The visual cue is a left edge accent, applied only when
-  // not already highlighted/selected so we don't stack rings.
+  // not already highlighted/selected so we don't switchboard rings.
   const mentionsMe = (m.mentions ?? []).some((mn) =>
     mn.kind === 'user' ? mn.user_id === currentUserID : true,
   )
@@ -3331,12 +3331,12 @@ function MessageItem({
           members={memberMap}
           currentUserID={currentUserID}
         />
-      ) : isHuddleStartedPayload(m.payload) ? (
-        // Server posts this when a huddle is created. The card pulls live
-        // state itself (via useHuddle) so it can flip "Join" vs "Ended"
+      ) : isJamStartedPayload(m.payload) ? (
+        // Server posts this when a jam is created. The card pulls live
+        // state itself (via useJam) so it can flip "Join" vs "Ended"
         // without prop drilling. Join button dispatches a window event
-        // the channel shell listens for — see OPEN_HUDDLE_EVENT.
-        <HuddleCard payload={m.payload} channelId={channelId} />
+        // the channel shell listens for — see OPEN_JAM_EVENT.
+        <JamCard payload={m.payload} channelId={channelId} />
       ) : m.payload ? (
         <div className="break-words">
           <MessageRender doc={m.payload as import('@tiptap/react').JSONContent} />
@@ -3924,7 +3924,7 @@ function Composer({
   })
   editorRef.current = editor
 
-  // MessageList fires `stack:focus-composer` when the user ArrowDowns past
+  // MessageList fires `switchboard:focus-composer` when the user ArrowDowns past
   // the most recent message — yield focus back to the composer.
   useEffect(() => {
     function onFocus(e: Event) {
@@ -3934,8 +3934,8 @@ function Composer({
       if (ev.detail.mode !== mode) return
       editorRef.current?.commands.focus()
     }
-    window.addEventListener('stack:focus-composer', onFocus)
-    return () => window.removeEventListener('stack:focus-composer', onFocus)
+    window.addEventListener('switchboard:focus-composer', onFocus)
+    return () => window.removeEventListener('switchboard:focus-composer', onFocus)
   }, [channelId, mode])
 
   // Whatever's mounted gets its preview URLs revoked on unmount.

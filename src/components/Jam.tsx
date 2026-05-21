@@ -1,17 +1,17 @@
-// Huddle — fullscreen overlay that hosts a LiveKit room for a channel.
+// Jam — fullscreen overlay that hosts a LiveKit room for a channel.
 //
-// The Stack server mints a JWT (POST /v1/channels/:id/huddle/join); we hand
+// The SwitchBoard server mints a JWT (POST /v1/channels/:id/jam/join); we hand
 // the URL + token to <LiveKitRoom> and compose our own UI on top of
 // @livekit/components-react primitives. We deliberately skip the
 // <VideoConference> prefab so the look matches the rest of the app
 // instead of LiveKit's stock dark theme.
 //
 //   • While we wait for the token mint, render a "joining…" spinner.
-//   • If the mint fails (most likely cause: huddles disabled on the
+//   • If the mint fails (most likely cause: jams disabled on the
 //     server, i.e. LIVEKIT_API_KEY unset → 503), show a readable error
 //     instead of a blank room.
-//   • On unmount or explicit close, call POST .../huddle/leave so the
-//     server marks us out and (if we were the last) ends the huddle.
+//   • On unmount or explicit close, call POST .../jam/leave so the
+//     server marks us out and (if we were the last) ends the jam.
 //
 // Layouts:
 //   - grid        — equal tiles (default for small rooms)
@@ -40,14 +40,14 @@ import { Track, VideoPresets } from 'livekit-client'
 import type { RoomOptions } from 'livekit-client'
 import type { TrackReferenceOrPlaceholder } from '@livekit/components-core'
 import {
-  useJoinHuddle,
-  useLeaveHuddle,
+  useJoinJam,
+  useLeaveJam,
   useActiveRecording,
-  useStartHuddleRecording,
-  useStopHuddleRecording,
-  type HuddleJoinResponse,
-  type HuddleRecording,
-} from '@stack/client'
+  useStartJamRecording,
+  useStopJamRecording,
+  type JamJoinResponse,
+  type JamRecording,
+} from '@switchboard/client'
 import {
   Mic,
   MicOff,
@@ -75,13 +75,13 @@ function tileKey(t: TrackReferenceOrPlaceholder): TileKey {
 
 type Props = {
   channelId: string
-  channelLabel: string // shown in the header — e.g. "# huddle-test"
+  channelLabel: string // shown in the header — e.g. "# jam-test"
   onClose: () => void
 }
 
-export function Huddle({ channelId, channelLabel, onClose }: Props) {
-  const join = useJoinHuddle(channelId)
-  const leave = useLeaveHuddle(channelId)
+export function Jam({ channelId, channelLabel, onClose }: Props) {
+  const join = useJoinJam(channelId)
+  const leave = useLeaveJam(channelId)
   // Track whether we successfully mounted into LiveKit so the unmount
   // cleanup only fires LEAVE for sessions that actually started. Spares
   // the server a 204 on every render of a 503-erroring overlay.
@@ -106,14 +106,14 @@ export function Huddle({ channelId, channelLabel, onClose }: Props) {
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800/80 px-4">
         <div className="flex items-center gap-2 text-sm">
           <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-          <span className="font-medium text-zinc-100">Huddle</span>
+          <span className="font-medium text-zinc-100">Jam</span>
           <span className="text-zinc-600">·</span>
           <span className="text-zinc-400">{channelLabel}</span>
         </div>
         <button
           type="button"
           onClick={onClose}
-          title="Close (leaves the huddle)"
+          title="Close (leaves the jam)"
           className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
         >
           <X className="h-4 w-4" />
@@ -121,7 +121,7 @@ export function Huddle({ channelId, channelLabel, onClose }: Props) {
       </header>
 
       <div className="relative flex-1 min-h-0">
-        {join.isPending && <Centered label="Joining huddle…" />}
+        {join.isPending && <Centered label="Joining jam…" />}
         {join.isError && (
           <Centered
             label={errorLabel(join.error)}
@@ -153,7 +153,7 @@ function LiveKitJoined({
   onDisconnect,
 }: {
   channelId: string
-  data: HuddleJoinResponse
+  data: JamJoinResponse
   onEntered: () => void
   onDisconnect: () => void
 }) {
@@ -166,16 +166,16 @@ function LiveKitJoined({
       video={false}
       onConnected={onEntered}
       onDisconnected={onDisconnect}
-      options={huddleRoomOptions}
+      options={jamRoomOptions}
       className="flex h-full flex-col"
     >
-      <HuddleRoom channelId={channelId} onLeave={onDisconnect} />
+      <JamRoom channelId={channelId} onLeave={onDisconnect} />
       <RoomAudioRenderer />
     </LiveKitRoom>
   )
 }
 
-// huddleRoomOptions — fidelity + bandwidth tuning. Module-scope (not inside
+// jamRoomOptions — fidelity + bandwidth tuning. Module-scope (not inside
 // the component) so React's reconciler can't accidentally hand <LiveKitRoom>
 // a fresh object on every render, which would re-construct the underlying
 // Room and tear down any in-flight tracks.
@@ -207,7 +207,7 @@ function LiveKitJoined({
 //
 // Together: you get 1080p when something's big, near-zero waste when it
 // isn't, and the publisher's encoder isn't burning cycles on dead layers.
-const huddleRoomOptions: RoomOptions = {
+const jamRoomOptions: RoomOptions = {
   adaptiveStream: true,
   dynacast: true,
   videoCaptureDefaults: {
@@ -233,15 +233,15 @@ const huddleRoomOptions: RoomOptions = {
   },
 }
 
-// HuddleRoom owns the layout / pin / hide-self state. It must live
+// JamRoom owns the layout / pin / hide-self state. It must live
 // *inside* <LiveKitRoom> so the LiveKit hooks have a room context.
-function HuddleRoom({ channelId, onLeave }: { channelId: string; onLeave: () => void }) {
+function JamRoom({ channelId, onLeave }: { channelId: string; onLeave: () => void }) {
   const [layout, setLayout] = useState<Layout>('grid')
   const [pinned, setPinned] = useState<TileKey | null>(null)
   const [hideSelf, setHideSelf] = useState(false)
 
   // Recording state — server-of-record. Watches the channel's recording
-  // list via stack-client; flips to non-null when any participant hits
+  // list via switchboard-client; flips to non-null when any participant hits
   // Record. Drives the REC banner + chime + voice line below.
   const activeRecording = useActiveRecording(channelId, /* realtimeOpen */ true)
   useRecordingConsentCue(activeRecording)
@@ -370,7 +370,7 @@ function HuddleRoom({ channelId, onLeave }: { channelId: string; onLeave: () => 
 
         {/* REC banner — pinned to the top, above everything. Visible to
             EVERY participant the moment a recording starts so consent is
-            unambiguous. See HUDDLE.md → consent model. */}
+            unambiguous. See JAM.md → consent model. */}
         {activeRecording && <RecordingBanner recording={activeRecording} />}
       </div>
 
@@ -382,7 +382,7 @@ function HuddleRoom({ channelId, onLeave }: { channelId: string; onLeave: () => 
 // RecordingBanner — the visible half of the consent contract. The audible
 // half (chime + voice) is fired by useRecordingConsentCue on the same
 // activeRecording transition.
-function RecordingBanner({ recording: _r }: { recording: HuddleRecording }) {
+function RecordingBanner({ recording: _r }: { recording: JamRecording }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
       <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-rose-600/95 px-3 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur">
@@ -399,12 +399,12 @@ function RecordingBanner({ recording: _r }: { recording: HuddleRecording }) {
 // useRecordingConsentCue — fires once per recording start, once per stop.
 // Uses Web Audio API for the chime (no asset shipping) and the browser's
 // SpeechSynthesis for the voice line. Both APIs require a prior user
-// gesture in some browsers; clicking the Huddle button on the way in is
+// gesture in some browsers; clicking the Jam button on the way in is
 // usually enough to satisfy that.
 //
 // We key on recording.id, not just on null→non-null, so a fresh recording
 // after a previous one stops still triggers the cue.
-function useRecordingConsentCue(active: HuddleRecording | null) {
+function useRecordingConsentCue(active: JamRecording | null) {
   const lastRecordingIdRef = useRef<string | null>(null)
   useEffect(() => {
     const previous = lastRecordingIdRef.current
@@ -792,7 +792,7 @@ function ControlBar({
   onLeave,
 }: {
   channelId: string
-  activeRecording: HuddleRecording | null
+  activeRecording: JamRecording | null
   onLeave: () => void
 }) {
   const participants = useParticipants()
@@ -802,8 +802,8 @@ function ControlBar({
   const cam = useTrackToggle({ source: Track.Source.Camera })
   const screen = useTrackToggle({ source: Track.Source.ScreenShare })
 
-  const startRec = useStartHuddleRecording(channelId)
-  const stopRec = useStopHuddleRecording(channelId)
+  const startRec = useStartJamRecording(channelId)
+  const stopRec = useStopJamRecording(channelId)
   const isRecording = activeRecording !== null
   // Disable while the mutation's in flight OR the server-side recording
   // is still 'processing' (egress finalizing). Stops a double-tap from
@@ -886,7 +886,7 @@ function ControlBar({
             // post-disconnect emptiness.
             onLeave()
           }}
-          title="Leave huddle"
+          title="Leave jam"
           className="flex items-center gap-2 rounded-full bg-rose-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-500 active:bg-rose-700"
         >
           <PhoneOff className="h-4 w-4" />
@@ -953,7 +953,7 @@ function Centered({ label, detail }: { label: string; detail?: string }) {
 function errorLabel(err: unknown): string {
   if (err && typeof err === 'object' && 'status' in err) {
     const status = (err as { status?: number }).status
-    if (status === 503) return 'Huddles are not configured on this server.'
+    if (status === 503) return 'Jams are not configured on this server.'
   }
-  return 'Could not join the huddle.'
+  return 'Could not join the jam.'
 }

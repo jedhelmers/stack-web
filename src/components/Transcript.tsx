@@ -1,10 +1,10 @@
 // Transcript card + modal viewer.
 //
-// The Stack server auto-posts a chat message when a recording's transcript
-// is ready. The message text is markdown ("📝 Huddle transcript ready —
+// The SwitchBoard server auto-posts a chat message when a recording's transcript
+// is ready. The message text is markdown ("📝 Jam transcript ready —
 // [view](…)") and the message payload carries the recording id:
 //
-//   { kind: 'huddle_transcript', recording_id: '...', huddle_id: '...' }
+//   { kind: 'jam_transcript', recording_id: '...', jam_id: '...' }
 //
 // Chat.tsx's MessageItem detects that payload and renders <TranscriptCard>
 // instead of the default TipTap MessageRender. Clicking the card's "View"
@@ -13,28 +13,28 @@
 
 import { useEffect, useState } from 'react'
 import {
-  useHuddle,
+  useJam,
   useRecordingTranscript,
   useChannelRecordings,
-  type HuddleTranscriptSegment,
-} from '@stack/client'
-import type { Member } from '@stack/client'
+  type JamTranscriptSegment,
+} from '@switchboard/client'
+import type { Member } from '@switchboard/client'
 import { FileText, Headphones, X } from 'lucide-react'
 
-// Custom event the HuddleCard's Join button dispatches. The channel
-// shell in Chat.tsx listens for it and flips its local huddleOpen state.
-// Custom-event indirection keeps us from threading a "join the huddle"
+// Custom event the JamCard's Join button dispatches. The channel
+// shell in Chat.tsx listens for it and flips its local jamOpen state.
+// Custom-event indirection keeps us from threading a "join the jam"
 // callback prop through MessageList → MessageItem just for this one card.
-export const OPEN_HUDDLE_EVENT = 'stack:open-huddle'
-export type OpenHuddleEventDetail = { channelId: string }
+export const OPEN_JAM_EVENT = 'switchboard:open-jam'
+export type OpenJamEventDetail = { channelId: string }
 
-// HuddleTranscriptPayload is the shape the server puts on system messages
+// JamTranscriptPayload is the shape the server puts on system messages
 // posted after a transcript completes. Matches buildTranscriptMessageText
-// in internal/huddles/transcribe.go.
-export type HuddleTranscriptPayload = {
-  kind: 'huddle_transcript'
+// in internal/jams/transcribe.go.
+export type JamTranscriptPayload = {
+  kind: 'jam_transcript'
   recording_id: string
-  huddle_id: string
+  jam_id: string
 }
 
 // isTranscriptPayload narrows an arbitrary message payload to the
@@ -42,11 +42,11 @@ export type HuddleTranscriptPayload = {
 // TranscriptCard instead of the default TipTap renderer.
 export function isTranscriptPayload(
   p: unknown,
-): p is HuddleTranscriptPayload {
+): p is JamTranscriptPayload {
   return (
     typeof p === 'object' &&
     p !== null &&
-    (p as { kind?: unknown }).kind === 'huddle_transcript' &&
+    (p as { kind?: unknown }).kind === 'jam_transcript' &&
     typeof (p as { recording_id?: unknown }).recording_id === 'string'
   )
 }
@@ -56,7 +56,7 @@ export function TranscriptCard({
   members,
   currentUserID,
 }: {
-  payload: HuddleTranscriptPayload
+  payload: JamTranscriptPayload
   members?: Map<string, Member>
   // When set, the transcript dialog aligns this user's segments on the
   // right (mirroring the chat layout convention) instead of left.
@@ -71,7 +71,7 @@ export function TranscriptCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-zinc-100">
-            Huddle transcript
+            Jam transcript
           </div>
           <div className="text-xs text-zinc-400">
             Recording {payload.recording_id.slice(0, 8)} · ready
@@ -131,7 +131,7 @@ function TranscriptDialog({
         <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div>
             <h2 className="text-base font-semibold text-zinc-100">
-              Huddle transcript
+              Jam transcript
             </h2>
             <p className="text-xs text-zinc-500">
               Recording {recordingId.slice(0, 8)}
@@ -181,7 +181,7 @@ function TranscriptSegments({
   members,
   currentUserID,
 }: {
-  segments: HuddleTranscriptSegment[]
+  segments: JamTranscriptSegment[]
   members?: Map<string, Member>
   // When provided, segments by this speaker render right-aligned with a
   // distinct bubble color — same convention as the chat message feed.
@@ -193,7 +193,7 @@ function TranscriptSegments({
   type Block = {
     speakerUserId: string
     startedAt: number
-    segments: HuddleTranscriptSegment[]
+    segments: JamTranscriptSegment[]
   }
   const blocks: Block[] = []
   for (const s of segments) {
@@ -266,56 +266,56 @@ function labelForSpeaker(userId: string, members?: Map<string, Member>): string 
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Huddle-started chat card
+// Jam-started chat card
 //
 // The server posts a system-ish message into the channel timeline when
-// someone starts a huddle (see postHuddleStartedMessage in
-// internal/huddles/handlers.go). The payload's `kind` is "huddle_started"
-// and carries the huddle id. Chat.tsx detects it and renders this card
+// someone starts a jam (see postJamStartedMessage in
+// internal/jams/handlers.go). The payload's `kind` is "jam_started"
+// and carries the jam id. Chat.tsx detects it and renders this card
 // instead of the default TipTap renderer — same swap pattern as the
 // transcript card.
 //
-// The card shows a Join button if the huddle is still live, else
-// "Huddle ended". "Still live" is determined by comparing the payload's
-// huddle_id against useChannelHuddle(channelId) — but to keep the surface
-// flat we don't import useHuddle here; instead the parent passes a
-// `huddleIsLive` boolean (or the parent's onJoin callback decides).
+// The card shows a Join button if the jam is still live, else
+// "Jam ended". "Still live" is determined by comparing the payload's
+// jam_id against useChannelJam(channelId) — but to keep the surface
+// flat we don't import useJam here; instead the parent passes a
+// `jamIsLive` boolean (or the parent's onJoin callback decides).
 
-export type HuddleStartedPayload = {
-  kind: 'huddle_started'
-  huddle_id: string
+export type JamStartedPayload = {
+  kind: 'jam_started'
+  jam_id: string
 }
 
-export function isHuddleStartedPayload(p: unknown): p is HuddleStartedPayload {
+export function isJamStartedPayload(p: unknown): p is JamStartedPayload {
   return (
     typeof p === 'object' &&
     p !== null &&
-    (p as { kind?: unknown }).kind === 'huddle_started' &&
-    typeof (p as { huddle_id?: unknown }).huddle_id === 'string'
+    (p as { kind?: unknown }).kind === 'jam_started' &&
+    typeof (p as { jam_id?: unknown }).jam_id === 'string'
   )
 }
 
-export function HuddleCard({
+export function JamCard({
   payload,
   channelId,
   realtimeOpen = false,
 }: {
-  payload: HuddleStartedPayload
+  payload: JamStartedPayload
   channelId: string
   realtimeOpen?: boolean
 }) {
   // Live state pulled from the server's view of the channel's current
-  // huddle. The card is "live" only if the channel's CURRENT active
-  // huddle matches the payload's huddle_id — otherwise this card
-  // belongs to a previous (now-ended) huddle.
-  const { data } = useHuddle(channelId, realtimeOpen)
-  const isLive = data?.huddle?.id === payload.huddle_id
+  // jam. The card is "live" only if the channel's CURRENT active
+  // jam matches the payload's jam_id — otherwise this card
+  // belongs to a previous (now-ended) jam.
+  const { data } = useJam(channelId, realtimeOpen)
+  const isLive = data?.jam?.id === payload.jam_id
 
   const onJoin = () => {
-    // Custom-event indirection — see OPEN_HUDDLE_EVENT at the top of
+    // Custom-event indirection — see OPEN_JAM_EVENT at the top of
     // the file for why we don't just call a prop callback.
     window.dispatchEvent(
-      new CustomEvent<OpenHuddleEventDetail>(OPEN_HUDDLE_EVENT, {
+      new CustomEvent<OpenJamEventDetail>(OPEN_JAM_EVENT, {
         detail: { channelId },
       }),
     )
@@ -333,10 +333,10 @@ export function HuddleCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-zinc-100">
-          {isLive ? 'Huddle in progress' : 'Huddle ended'}
+          {isLive ? 'Jam in progress' : 'Jam ended'}
         </div>
         <div className="text-xs text-zinc-400">
-          {isLive ? 'Jump in to talk' : `Started here · ${payload.huddle_id.slice(0, 8)}`}
+          {isLive ? 'Jump in to talk' : `Started here · ${payload.jam_id.slice(0, 8)}`}
         </div>
       </div>
       {isLive && (
@@ -386,7 +386,7 @@ export function RecordingsPanel({
     return (
       <PanelMessage>
         No recordings in this channel yet. Hit the Record button inside a
-        huddle to capture one.
+        jam to capture one.
       </PanelMessage>
     )
   }

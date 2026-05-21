@@ -14,7 +14,7 @@ import {
   registerPayloadRenderer,
   type SlashCommand,
   type PayloadRenderer,
-} from '@stack/client'
+} from '@switchboard/client'
 
 type GiphyPayload = {
   type: 'giphy'
