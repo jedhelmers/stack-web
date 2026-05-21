@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLogin, APIError } from '@stack/client'
+import { useLogin, APIError } from '@switchboard/client'
 
 export function Login() {
   const [email, setEmail] = useState('')
@@ -25,7 +25,7 @@ export function Login() {
         className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 shadow-xl backdrop-blur space-y-4"
       >
         <header>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">Stack</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">SwitchBoard</h1>
           <p className="text-sm text-zinc-400">Sign in to continue</p>
         </header>
 

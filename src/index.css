@@ -3,14 +3,14 @@
 @source "./**/*.{html,tsx,ts}";
 
 /* =============================================================
-   Stack Web — theme tokens
+   SwitchBoard Web — theme tokens
    -------------------------------------------------------------
    The library's components use plain Tailwind colour utilities
    (`bg-zinc-950`, `text-rose-400`, `border-sky-500`, …). Tailwind
    v4 emits those utilities as references to `var(--color-…)`, so
    here we redirect each Tailwind colour token to a semantic
-   `--stack-*` variable. Override the `--stack-*` tokens (either
-   in your own CSS or via `applyTheme()` from 'stack-web') to
+   `--switchboard-*` variable. Override the `--switchboard-*` tokens (either
+   in your own CSS or via `applyTheme()` from 'switchboard-web') to
    retheme the entire library at runtime.
    ============================================================= */
 
@@ -20,129 +20,129 @@
      `.text-zinc-100` and `.text-zinc-300` utilities below also
      read this token so the highest-emphasis labels render at the
      same opacity as <body>. */
-  --stack-text-body: rgba(255, 255, 255, 0.78);
+  --switchboard-text-body: rgba(255, 255, 255, 0.78);
 
   /* Neutral scale — chrome, panels, type.
      Lightest (100) → darkest (950). Maps to Tailwind's zinc. */
-  --stack-neutral-100: oklch(96.7% 0.001 286.375);
-  --stack-neutral-200: oklch(92% 0.004 286.32);
-  --stack-neutral-300: oklch(87.1% 0.006 286.286);
-  --stack-neutral-400: oklch(70.5% 0.015 286.067);
-  --stack-neutral-500: oklch(55.2% 0.016 285.938);
-  --stack-neutral-600: oklch(44.2% 0.017 285.786);
-  --stack-neutral-700: oklch(37% 0.013 285.805);
-  --stack-neutral-800: oklch(27.4% 0.006 286.033);
-  --stack-neutral-900: oklch(21% 0.006 285.885);
-  --stack-neutral-950: oklch(14.1% 0.005 285.823);
+  --switchboard-neutral-100: oklch(96.7% 0.001 286.375);
+  --switchboard-neutral-200: oklch(92% 0.004 286.32);
+  --switchboard-neutral-300: oklch(87.1% 0.006 286.286);
+  --switchboard-neutral-400: oklch(70.5% 0.015 286.067);
+  --switchboard-neutral-500: oklch(55.2% 0.016 285.938);
+  --switchboard-neutral-600: oklch(44.2% 0.017 285.786);
+  --switchboard-neutral-700: oklch(37% 0.013 285.805);
+  --switchboard-neutral-800: oklch(27.4% 0.006 286.033);
+  --switchboard-neutral-900: oklch(21% 0.006 285.885);
+  --switchboard-neutral-950: oklch(14.1% 0.005 285.823);
 
   /* Accent — primary CTA, focus rings, links. Maps to Tailwind's sky. */
-  --stack-accent-300: oklch(82.8% 0.111 230.318);
-  --stack-accent-400: oklch(74.6% 0.16 232.661);
-  --stack-accent-500: oklch(68.5% 0.169 237.323);
-  --stack-accent-600: oklch(58.8% 0.158 241.966);
-  --stack-accent-900: oklch(39.1% 0.09 240.876);
-  --stack-accent-950: oklch(29.3% 0.066 243.157);
+  --switchboard-accent-300: oklch(82.8% 0.111 230.318);
+  --switchboard-accent-400: oklch(74.6% 0.16 232.661);
+  --switchboard-accent-500: oklch(68.5% 0.169 237.323);
+  --switchboard-accent-600: oklch(58.8% 0.158 241.966);
+  --switchboard-accent-900: oklch(39.1% 0.09 240.876);
+  --switchboard-accent-950: oklch(29.3% 0.066 243.157);
 
   /* Success — confirmations, healthy states. Maps to emerald. */
-  --stack-success-400: oklch(76.5% 0.177 163.223);
-  --stack-success-500: oklch(69.6% 0.17 162.48);
-  --stack-success-600: oklch(59.6% 0.145 163.225);
-  --stack-success-700: oklch(50.8% 0.118 165.612);
-  --stack-success-900: oklch(37.8% 0.077 168.94);
-  --stack-success-950: oklch(26.2% 0.051 172.552);
+  --switchboard-success-400: oklch(76.5% 0.177 163.223);
+  --switchboard-success-500: oklch(69.6% 0.17 162.48);
+  --switchboard-success-600: oklch(59.6% 0.145 163.225);
+  --switchboard-success-700: oklch(50.8% 0.118 165.612);
+  --switchboard-success-900: oklch(37.8% 0.077 168.94);
+  --switchboard-success-950: oklch(26.2% 0.051 172.552);
 
   /* Warning — caution, pending states. Maps to amber. */
-  --stack-warning-200: oklch(92.4% 0.12 95.746);
-  --stack-warning-300: oklch(87.9% 0.169 91.605);
-  --stack-warning-400: oklch(82.8% 0.189 84.429);
-  --stack-warning-500: oklch(76.9% 0.188 70.08);
-  --stack-warning-900: oklch(41.4% 0.112 45.904);
-  --stack-warning-950: oklch(27.9% 0.077 45.635);
+  --switchboard-warning-200: oklch(92.4% 0.12 95.746);
+  --switchboard-warning-300: oklch(87.9% 0.169 91.605);
+  --switchboard-warning-400: oklch(82.8% 0.189 84.429);
+  --switchboard-warning-500: oklch(76.9% 0.188 70.08);
+  --switchboard-warning-900: oklch(41.4% 0.112 45.904);
+  --switchboard-warning-950: oklch(27.9% 0.077 45.635);
 
   /* Danger — errors, destructive actions. Maps to rose. */
-  --stack-danger-300: oklch(81% 0.117 11.638);
-  --stack-danger-400: oklch(71.2% 0.194 13.428);
-  --stack-danger-500: oklch(64.5% 0.246 16.439);
-  --stack-danger-900: oklch(41% 0.159 10.272);
-  --stack-danger-950: oklch(27.1% 0.105 12.094);
+  --switchboard-danger-300: oklch(81% 0.117 11.638);
+  --switchboard-danger-400: oklch(71.2% 0.194 13.428);
+  --switchboard-danger-500: oklch(64.5% 0.246 16.439);
+  --switchboard-danger-900: oklch(41% 0.159 10.272);
+  --switchboard-danger-950: oklch(27.1% 0.105 12.094);
 
   /* Info — secondary accent for less-urgent badges. Maps to violet. */
-  --stack-info-400: oklch(70.2% 0.183 293.541);
-  --stack-info-900: oklch(38% 0.189 293.745);
-  --stack-info-950: oklch(28.3% 0.141 291.089);
+  --switchboard-info-400: oklch(70.2% 0.183 293.541);
+  --switchboard-info-900: oklch(38% 0.189 293.745);
+  --switchboard-info-950: oklch(28.3% 0.141 291.089);
 
   /* Highlight — inline marks in the rich-text editor. Maps to orange. */
-  --stack-highlight-400: oklch(75% 0.183 55.934);
+  --switchboard-highlight-400: oklch(75% 0.183 55.934);
 
   /* =============================================================
      Tailwind colour rewiring
      -------------------------------------------------------------
      Every Tailwind colour utility the library uses reads through
      one of these vars. Don't override the `--color-*` tokens
-     directly — change `--stack-*` above (or pass a palette to
+     directly — change `--switchboard-*` above (or pass a palette to
      `applyTheme()`) and they'll cascade everywhere. Add new
      entries here only when a component starts using a Tailwind
      shade we haven't routed yet.
      ============================================================= */
 
-  --color-zinc-100: var(--stack-neutral-100);
-  --color-zinc-200: var(--stack-neutral-200);
-  --color-zinc-300: var(--stack-neutral-300);
-  --color-zinc-400: var(--stack-neutral-400);
-  --color-zinc-500: var(--stack-neutral-500);
-  --color-zinc-600: var(--stack-neutral-600);
-  --color-zinc-700: var(--stack-neutral-700);
-  --color-zinc-800: var(--stack-neutral-800);
-  --color-zinc-900: var(--stack-neutral-900);
-  --color-zinc-950: var(--stack-neutral-950);
+  --color-zinc-100: var(--switchboard-neutral-100);
+  --color-zinc-200: var(--switchboard-neutral-200);
+  --color-zinc-300: var(--switchboard-neutral-300);
+  --color-zinc-400: var(--switchboard-neutral-400);
+  --color-zinc-500: var(--switchboard-neutral-500);
+  --color-zinc-600: var(--switchboard-neutral-600);
+  --color-zinc-700: var(--switchboard-neutral-700);
+  --color-zinc-800: var(--switchboard-neutral-800);
+  --color-zinc-900: var(--switchboard-neutral-900);
+  --color-zinc-950: var(--switchboard-neutral-950);
 
-  --color-sky-300: var(--stack-accent-300);
-  --color-sky-400: var(--stack-accent-400);
-  --color-sky-500: var(--stack-accent-500);
-  --color-sky-600: var(--stack-accent-600);
-  --color-sky-900: var(--stack-accent-900);
-  --color-sky-950: var(--stack-accent-950);
+  --color-sky-300: var(--switchboard-accent-300);
+  --color-sky-400: var(--switchboard-accent-400);
+  --color-sky-500: var(--switchboard-accent-500);
+  --color-sky-600: var(--switchboard-accent-600);
+  --color-sky-900: var(--switchboard-accent-900);
+  --color-sky-950: var(--switchboard-accent-950);
 
-  --color-emerald-400: var(--stack-success-400);
-  --color-emerald-500: var(--stack-success-500);
-  --color-emerald-600: var(--stack-success-600);
-  --color-emerald-700: var(--stack-success-700);
-  --color-emerald-900: var(--stack-success-900);
-  --color-emerald-950: var(--stack-success-950);
+  --color-emerald-400: var(--switchboard-success-400);
+  --color-emerald-500: var(--switchboard-success-500);
+  --color-emerald-600: var(--switchboard-success-600);
+  --color-emerald-700: var(--switchboard-success-700);
+  --color-emerald-900: var(--switchboard-success-900);
+  --color-emerald-950: var(--switchboard-success-950);
 
-  --color-amber-200: var(--stack-warning-200);
-  --color-amber-300: var(--stack-warning-300);
-  --color-amber-400: var(--stack-warning-400);
-  --color-amber-500: var(--stack-warning-500);
-  --color-amber-900: var(--stack-warning-900);
-  --color-amber-950: var(--stack-warning-950);
+  --color-amber-200: var(--switchboard-warning-200);
+  --color-amber-300: var(--switchboard-warning-300);
+  --color-amber-400: var(--switchboard-warning-400);
+  --color-amber-500: var(--switchboard-warning-500);
+  --color-amber-900: var(--switchboard-warning-900);
+  --color-amber-950: var(--switchboard-warning-950);
 
-  --color-rose-300: var(--stack-danger-300);
-  --color-rose-400: var(--stack-danger-400);
-  --color-rose-500: var(--stack-danger-500);
-  --color-rose-900: var(--stack-danger-900);
-  --color-rose-950: var(--stack-danger-950);
+  --color-rose-300: var(--switchboard-danger-300);
+  --color-rose-400: var(--switchboard-danger-400);
+  --color-rose-500: var(--switchboard-danger-500);
+  --color-rose-900: var(--switchboard-danger-900);
+  --color-rose-950: var(--switchboard-danger-950);
 
-  --color-violet-400: var(--stack-info-400);
-  --color-violet-900: var(--stack-info-900);
-  --color-violet-950: var(--stack-info-950);
+  --color-violet-400: var(--switchboard-info-400);
+  --color-violet-900: var(--switchboard-info-900);
+  --color-violet-950: var(--switchboard-info-950);
 
-  --color-orange-400: var(--stack-highlight-400);
+  --color-orange-400: var(--switchboard-highlight-400);
 }
 
 body {
-  color: var(--stack-text-body);
+  color: var(--switchboard-text-body);
 }
 
 /* `text-zinc-100` and `text-zinc-300` are used across the app for
    high-emphasis labels. Render them at the body opacity so a
-   single token (`--stack-text-body`) controls all foreground
+   single token (`--switchboard-text-body`) controls all foreground
    prose. `bg-zinc-100` and `border-zinc-100` stay tied to
-   `--stack-neutral-100` because they target other CSS properties. */
+   `--switchboard-neutral-100` because they target other CSS properties. */
 .text-zinc-100,
 .hover\:text-zinc-100:hover,
 .text-zinc-300 {
-  color: var(--stack-text-body);
+  color: var(--switchboard-text-body);
 }
 
 /* The shell never scrolls. Every scroll happens inside a
@@ -162,4 +162,172 @@ body,
 .ProseMirror:focus,
 .ProseMirror:focus-visible {
   outline: none !important;
+}
+
+/* =============================================================
+   Form-control normalization
+   -------------------------------------------------------------
+   Tailwind preflight handles `font-family: inherit` and most
+   resets, but several cross-browser quirks still bleed through
+   (Safari rounding, Firefox number-spinners, WebKit autofill
+   yellow, picker glyph colour, native select chevron). Normalize
+   them here so every component renders identically without
+   per-input boilerplate.
+   ============================================================= */
+
+:root {
+  /* Tells the UA which palette to use for native widgets
+     (scrollbars, date picker glyphs, default form colours). The
+     library ships dark by default — flip this to `light dark` in
+     a host-app override if you support a light theme. */
+  color-scheme: dark;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  /* Safari rounds inputs/buttons/selects by default; force the
+     library's own border-radius (or none) to win. */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  /* iOS Safari & some Android browsers zoom into inputs whose
+     computed font-size is < 16px on focus. Bumping the minimum
+     keeps the page stable. Components that opt into a smaller
+     size override this with their own utility. */
+  font-size: max(1em, 16px);
+}
+
+/* Restore the native chevron for <select> — `appearance: none`
+   above strips it, which is the right default for custom
+   selects, but our plain <select> usages still expect one. */
+select {
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 13px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+select::-ms-expand {
+  display: none;
+}
+
+/* Placeholder colour differs between Firefox (50% opacity body
+   colour) and WebKit (light grey). Pin it to a neutral token. */
+::placeholder {
+  color: var(--switchboard-neutral-500);
+  opacity: 1;
+}
+
+/* WebKit paints autofilled inputs with a hardcoded pale-yellow
+   background and black text that ignores our theme. The inset
+   shadow trick is the only reliable way to mask it. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--switchboard-text-body);
+  -webkit-box-shadow: 0 0 0 1000px var(--switchboard-neutral-900) inset;
+  caret-color: var(--switchboard-text-body);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Firefox draws a red inner glow on invalid inputs by default.
+   Components opt into their own invalid styling. */
+input:invalid,
+textarea:invalid,
+select:invalid {
+  box-shadow: none;
+}
+input:-moz-ui-invalid,
+textarea:-moz-ui-invalid {
+  box-shadow: none;
+}
+
+/* Remove the Firefox inner focus outline (we draw our own ring). */
+input::-moz-focus-inner,
+button::-moz-focus-inner {
+  border: 0;
+  padding: 0;
+}
+
+/* Hide number-input spinners. Chrome/Safari and Firefox use
+   different selectors; cover both. */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* WebKit decorates type="search" with rounded corners and a
+   cancel button; strip them so it matches type="text". */
+input[type="search"] {
+  -webkit-appearance: none;
+}
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-results-button,
+input[type="search"]::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  display: none;
+}
+
+/* The native calendar/clock icon on date/time inputs is rendered
+   black in WebKit regardless of `color`. Invert it on our dark
+   surfaces so it's actually visible. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+/* iOS Safari adds rounded corners and an inner shadow to
+   <textarea>. Reset to match other inputs. */
+textarea {
+  resize: vertical;
+  -webkit-appearance: none;
+  border-radius: 0;
+}
+
+/* Buttons inherit `text-align: center` on Safari but `start` on
+   Firefox. Pin it. */
+button {
+  text-align: center;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* file inputs render wildly differently per browser; pin the
+   button surface to neutral tokens so at least the colour is
+   consistent. Components that need a custom file picker should
+   hide the input and trigger it from a styled label. */
+input[type="file"]::-webkit-file-upload-button,
+input[type="file"]::file-selector-button {
+  font: inherit;
+  color: inherit;
+  background: var(--switchboard-neutral-800);
+  border: 1px solid var(--switchboard-neutral-700);
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  margin-right: 0.75rem;
+  cursor: pointer;
 }

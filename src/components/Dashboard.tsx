@@ -30,7 +30,7 @@ import {
   useOpUnsuspendWorkspace,
   useOpUpdateMemberRole,
   useOpUpdateUser,
-} from '@stack/client'
+} from '@switchboard/client'
 import type {
   Member,
   OperatorAPIKey,
@@ -41,7 +41,7 @@ import type {
   OperatorUser,
   OperatorWorkspace,
   User,
-} from '@stack/client'
+} from '@switchboard/client'
 
 type MemberRole = 'owner' | 'admin' | 'member' | 'guest' | 'bot'
 // Roles operators can assign through the UI. `bot` is reserved for API /

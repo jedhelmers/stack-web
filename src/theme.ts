@@ -1,7 +1,7 @@
-// Runtime theming for stack-web.
+// Runtime theming for switchboard-web.
 //
 // Every Tailwind colour utility used by the library reads through a
-// `--stack-*` CSS variable defined in `src/index.css`. This module
+// `--switchboard-*` CSS variable defined in `src/index.css`. This module
 // is the programmatic surface for changing those variables — point
 // a host app's theme system at `applyTheme()` and the entire UI
 // will follow.
@@ -17,7 +17,7 @@ type HighlightScale = 400
 type ScalePalette<K extends number> = Record<K, string>
 type PartialScale<K extends number> = Partial<ScalePalette<K>>
 
-export interface StackPalette {
+export interface SwitchBoardPalette {
   /** Body / prominent foreground text. Backs `<body>` and the
    *  `text-zinc-100` / `text-zinc-300` utilities. */
   textBody: string
@@ -38,7 +38,7 @@ export interface StackPalette {
   highlight: ScalePalette<HighlightScale>
 }
 
-export interface StackPaletteOverrides {
+export interface SwitchBoardPaletteOverrides {
   textBody?: string
   neutral?: PartialScale<NeutralScale>
   accent?: PartialScale<AccentScale>
@@ -51,7 +51,7 @@ export interface StackPaletteOverrides {
 
 /** Default palette, identical to the values shipped in `style.css`.
  *  Use as a starting point when building a variant. */
-export const defaultDarkTheme: StackPalette = {
+export const defaultDarkTheme: SwitchBoardPalette = {
   textBody: 'rgba(255, 255, 255, 0.78)',
   neutral: {
     100: 'oklch(96.7% 0.001 286.375)',
@@ -109,12 +109,12 @@ export const defaultDarkTheme: StackPalette = {
 type Scope = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'info' | 'highlight'
 
 function cssVar(scope: Scope, shade: number): string {
-  return `--stack-${scope}-${shade}`
+  return `--switchboard-${scope}-${shade}`
 }
 
-function collectVars(overrides: StackPaletteOverrides): Array<[string, string]> {
+function collectVars(overrides: SwitchBoardPaletteOverrides): Array<[string, string]> {
   const out: Array<[string, string]> = []
-  if (overrides.textBody !== undefined) out.push(['--stack-text-body', overrides.textBody])
+  if (overrides.textBody !== undefined) out.push(['--switchboard-text-body', overrides.textBody])
   const scopes: Scope[] = ['neutral', 'accent', 'success', 'warning', 'danger', 'info', 'highlight']
   for (const scope of scopes) {
     const scale = overrides[scope]
@@ -152,7 +152,7 @@ function resolveTarget(target?: HTMLElement | null): HTMLElement | null {
  *   }), [])
  */
 export function applyTheme(
-  overrides: StackPaletteOverrides,
+  overrides: SwitchBoardPaletteOverrides,
   target?: HTMLElement | null,
 ): () => void {
   const el = resolveTarget(target)
@@ -181,7 +181,7 @@ export function applyTheme(
 }
 
 /**
- * Remove every `--stack-*` override that was set inline on the
+ * Remove every `--switchboard-*` override that was set inline on the
  * target element, restoring the defaults from `style.css`. Use
  * this when switching back to the bundled theme without remembering
  * which keys were overridden.
@@ -191,7 +191,7 @@ export function resetTheme(target?: HTMLElement | null): void {
   if (!el) return
   for (let i = el.style.length - 1; i >= 0; i--) {
     const name = el.style.item(i)
-    if (name && name.startsWith('--stack-')) {
+    if (name && name.startsWith('--switchboard-')) {
       el.style.removeProperty(name)
     }
   }

@@ -10,7 +10,7 @@ import {
 import { X } from 'lucide-react'
 
 // A single global modal slot. Mirrors RightSidebar — one thing open at a
-// time. Stacking modals is a UX trap (where does Escape go?) so we don't.
+// time. SwitchBoarding modals is a UX trap (where does Escape go?) so we don't.
 // Opening a new slot replaces what was there.
 
 export type ModalSlot = {

@@ -4,6 +4,16 @@ import type { Editor } from '@tiptap/react'
 import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
+import { Jam } from './Jam'
+import {
+  isTranscriptPayload,
+  isJamStartedPayload,
+  TranscriptCard,
+  JamCard,
+  RecordingsPanel,
+  OPEN_JAM_EVENT,
+  type OpenJamEventDetail,
+} from './Transcript'
 import { RightSidebar, useRightSidebar } from './RightSidebar'
 import { useModal } from './Modal'
 import {
@@ -27,6 +37,7 @@ import {
   List,
   ListOrdered,
   MessageSquare,
+  Headphones,
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
@@ -94,7 +105,7 @@ import {
   setCurrentUser,
   type MessagesInfiniteData,
   type UnreadMap,
-} from '@stack/client'
+} from '@switchboard/client'
 import type {
   AttachmentFile,
   Channel,
@@ -104,7 +115,7 @@ import type {
   Member,
   Message,
   User,
-} from '@stack/client'
+} from '@switchboard/client'
 
 type Props = {
   user: User
@@ -389,7 +400,7 @@ export function Chat({
           totalUnread={mentionCounts?.total ?? 0}
           onClick={openMentionsPanel}
         />
-        <MembersAvatarStack members={members} onClick={openMembersModal} />
+        <MembersAvatarSwitchBoard members={members} onClick={openMembersModal} />
       </header>
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {!leftNavOpen && (
@@ -565,6 +576,27 @@ export function Chat({
                     onJump={(messageId) =>
                       handleSelectChannel(activeChannel.id, messageId)
                     }
+                  />
+                ),
+              })
+            }}
+            onOpenRecordings={() => {
+              if (!activeChannel) return
+              const channelName =
+                activeChannel.slug ?? activeChannel.name ?? 'channel'
+              const isDM =
+                activeChannel.kind === 'dm' || activeChannel.kind === 'group_dm'
+              sidebar.open({
+                id: `recordings:${activeChannel.id}`,
+                title: isDM ? 'Recordings' : `Recordings in #${channelName}`,
+                body: (
+                  <RecordingsPanel
+                    channelId={activeChannel.id}
+                    members={
+                      new Map((members ?? []).map((m) => [m.user_id, m]))
+                    }
+                    currentUserID={user.id}
+                    realtimeOpen={rtState === 'open'}
                   />
                 ),
               })
@@ -924,10 +956,10 @@ function walkText(node: { content?: unknown[]; text?: string }, out: string[]) {
   }
 }
 
-// MembersAvatarStack — header-level summary of workspace members. Renders
+// MembersAvatarSwitchBoard — header-level summary of workspace members. Renders
 // up to MAX_VISIBLE overlapping avatars, then a "+N" pill, then opens the
 // full searchable list in a modal on click.
-function MembersAvatarStack({
+function MembersAvatarSwitchBoard({
   members,
   onClick,
 }: {
@@ -2501,6 +2533,7 @@ function ChannelView({
   onChannelGone,
   onOpenThread,
   onOpenPins,
+  onOpenRecordings,
   onUserClick,
 }: {
   channel: Channel
@@ -2514,11 +2547,30 @@ function ChannelView({
   onChannelGone: () => void
   onOpenThread: (rootId: string) => void
   onOpenPins: () => void
+  onOpenRecordings: () => void
   onUserClick: (userId: string) => void
 }) {
   const memberMap = new Map((members ?? []).map((m) => [m.user_id, m]))
   const isDM = channel.kind === 'dm' || channel.kind === 'group_dm'
   const typingUserIDs = useTypingState(channel.id, currentUserID)
+  // Jam overlay state. Local to the channel view — closing leaves the
+  // jam (the Jam component fires LEAVE on unmount). Resets when the
+  // user navigates to a different channel because this whole component
+  // remounts with a fresh channel id.
+  const [jamOpen, setJamOpen] = useState(false)
+  // Listen for JamCard's "Join" button (and any future dispatcher) —
+  // see OPEN_JAM_EVENT in Transcript.tsx. Scoped to this channel: the
+  // event carries a channelId and we ignore mismatches in case the user
+  // navigated away between dispatch and handle.
+  useEffect(() => {
+    function onOpen(e: Event) {
+      const detail = (e as CustomEvent<OpenJamEventDetail>).detail
+      if (detail?.channelId === channel.id) setJamOpen(true)
+    }
+    window.addEventListener(OPEN_JAM_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_JAM_EVENT, onOpen)
+  }, [channel.id])
+  const channelLabel = `${isDM ? '@ ' : '# '}${channel.slug ?? channel.name ?? '(dm)'}`
   return (
     <>
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
@@ -2532,6 +2584,22 @@ function ChannelView({
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setJamOpen(true)}
+            title="Start or join jam"
+            className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            <Headphones className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenRecordings}
+            title="Past jam recordings"
+            className="flex h-8 w-8 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          >
+            <Mic className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={onOpenPins}
@@ -2549,6 +2617,13 @@ function ChannelView({
           )}
         </div>
       </header>
+      {jamOpen && (
+        <Jam
+          channelId={channel.id}
+          channelLabel={channelLabel}
+          onClose={() => setJamOpen(false)}
+        />
+      )}
 
       <MessageList
         channelId={channel.id}
@@ -2737,8 +2812,33 @@ function MessageList({
         return
       }
       if (ordered.length === 0) return
-      e.preventDefault()
       const dir = e.key === 'ArrowDown' ? 1 : -1
+      const curIdx = selectedId
+        ? ordered.findIndex((m) => m.id === selectedId)
+        : -1
+      // ArrowDown past the most recent message exits message-nav and hands
+      // focus back to the composer. The Composer subscribes to
+      // `switchboard:focus-composer` and calls editor.commands.focus() on match.
+      if (dir === 1 && curIdx === ordered.length - 1) {
+        e.preventDefault()
+        setSelectedId(null)
+        window.dispatchEvent(
+          new CustomEvent('switchboard:focus-composer', {
+            detail: { channelId, mode: 'channel' },
+          }),
+        )
+        return
+      }
+      e.preventDefault()
+      // Hand focus from the composer/editor to message-nav mode. Without
+      // this, the TipTap contentEditable keeps focus, so the next plain
+      // keystroke (e.g. 'p' to pin, 'e' to edit) gets swallowed as a
+      // character insert before our window handlers see it.
+      const active = document.activeElement as HTMLElement | null
+      if (active && (active.isContentEditable ||
+          active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        active.blur()
+      }
       setSelectedId((cur) => {
         if (cur == null) {
           // No selection yet — first press grabs the most recent message.
@@ -2752,7 +2852,7 @@ function MessageList({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [ordered, selectedId])
+  }, [ordered, selectedId, channelId])
 
   // Reset selection when the channel switches — the previous selection
   // doesn't refer to anything in the new view.
@@ -2786,10 +2886,12 @@ function MessageList({
   // 'e' hotkey — enter edit mode on the selected message, but only when
   // (1) the selection IS the user's most recent message in this channel
   // (server rejects edits on older messages anyway), and (2) the user
-  // isn't currently typing in an editable area (otherwise pressing 'e' in
-  // the composer would always trip the hotkey). Counter-based so the
-  // MessageItem's effect re-fires on every press, not just the first.
-  const [editRequestTick, setEditRequestTick] = useState(0)
+  // isn't currently typing in an editable area. Encoded as
+  // { id, n } so the targeted MessageItem can distinguish "a fresh
+  // request landed on me" from "I just got selected and the request was
+  // already non-null". A bare counter would fire spuriously each time
+  // selection moved onto a different message.
+  const [editRequest, setEditRequest] = useState<{ id: string; n: number } | null>(null)
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'e' && e.key !== 'E') return
@@ -2803,17 +2905,19 @@ function MessageList({
         if (active.isContentEditable) return
       }
       e.preventDefault()
-      setEditRequestTick((t) => t + 1)
+      setEditRequest((cur) => ({ id: selectedId, n: (cur?.n ?? 0) + 1 }))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, myLatestMessageId])
 
-  // 'p' hotkey — toggle pin on the selected message. Same gating as 'e':
-  // skipped when the user is typing in an editor or any modifier is held.
-  // Pin permissions are channel-wide (any member can pin any message), so
-  // unlike 'e' this fires regardless of authorship.
-  const [pinRequestTick, setPinRequestTick] = useState(0)
+  // 'p' hotkey — toggle pin on the selected message. Mutation fires
+  // directly from the keydown handler; we deliberately don't relay through
+  // a prop on MessageItem because props that flip when `selectedId` moves
+  // would trip every newly-selected item's effect with the latest tick.
+  // Pin permissions are channel-wide, so this isn't author-gated.
+  const pinMut = usePinMessage(channelId)
+  const unpinMut = useUnpinMessage(channelId)
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'p' && e.key !== 'P') return
@@ -2825,11 +2929,17 @@ function MessageList({
         if (active.isContentEditable) return
       }
       e.preventDefault()
-      setPinRequestTick((t) => t + 1)
+      const target = ordered.find((m) => m.id === selectedId)
+      if (!target) return
+      if (target.pinned) {
+        unpinMut.mutate({ messageId: target.id })
+      } else {
+        pinMut.mutate({ messageId: target.id, pinnedByUserId: currentUserID })
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId])
+  }, [selectedId, ordered, currentUserID, pinMut, unpinMut])
 
   // ── scroll anchoring ─────────────────────────────────────────────────────
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -2974,8 +3084,7 @@ function MessageList({
                 isMyLatest={m.id === myLatestMessageId}
                 onOpenThread={onOpenThread}
                 onUserClick={onUserClick}
-                editRequestTick={m.id === selectedId ? editRequestTick : 0}
-                pinRequestTick={m.id === selectedId ? pinRequestTick : 0}
+                editRequest={editRequest && editRequest.id === m.id ? editRequest : null}
               />
             </Fragment>
           )
@@ -3070,8 +3179,7 @@ function MessageItem({
   isMyLatest = false,
   onOpenThread,
   onUserClick,
-  editRequestTick = 0,
-  pinRequestTick = 0,
+  editRequest = null,
 }: {
   m: Message
   member?: Member
@@ -3090,13 +3198,11 @@ function MessageItem({
   // Fires when the avatar or author name is clicked. Parent opens the user
   // info panel in the right sidebar.
   onUserClick?: (userId: string) => void
-  // Counter from MessageList — bumps every time the user presses 'e' on the
-  // selected message. We enter edit mode whenever it ticks up. Zero means no
-  // pending request.
-  editRequestTick?: number
-  // Counter from MessageList — bumps when the user presses 'p' on the
-  // selected message. We toggle pin state whenever it ticks up.
-  pinRequestTick?: number
+  // Targeted edit request from MessageList. Only set when the user pressed
+  // 'e' AND this item is the intended target — `id` always matches `m.id`
+  // when non-null, and `n` increments per press so consecutive 'e' presses
+  // on the same message re-trigger the effect.
+  editRequest?: { id: string; n: number } | null
 }) {
   const author = member?.display_name ?? '(unknown user)'
   // Slack-style "10:04 AM" — drop seconds.
@@ -3113,31 +3219,23 @@ function MessageItem({
   const pinMut = usePinMessage(channelId)
   const unpinMut = useUnpinMessage(channelId)
 
-  // Honor 'e' hotkey requests from MessageList. The parent gates on
-  // ownership + isMyLatest already, but we also require the tick to be
-  // non-zero (zero = "no pending request"). Defensive isOwn + isMyLatest
-  // checks here too in case the prop is passed in error.
+  // Honor 'e' hotkey requests from MessageList. The parent only sets
+  // editRequest on the targeted message, but a freshly-selected item still
+  // sees the prop transition `null → {id, n}`, which would otherwise fire
+  // the effect even when the user didn't press 'e'. Track the last `n` we
+  // acted on and ignore everything else.
+  const lastEditNRef = useRef<number | null>(null)
   useEffect(() => {
-    if (editRequestTick === 0) return
+    if (!editRequest) {
+      lastEditNRef.current = null
+      return
+    }
+    if (lastEditNRef.current === editRequest.n) return
+    lastEditNRef.current = editRequest.n
+    // Defensive — parent gates on ownership + isMyLatest already.
     if (!isOwn || !isMyLatest) return
     setEditing(true)
-    // We only care about the tick changing; the gates are stable for the
-    // lifetime of this MessageItem instance.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editRequestTick])
-
-  // Honor 'p' hotkey requests — toggle pin. We read `m.pinned` at tick time
-  // so the toggle reflects the current state even if the user pressed 'p'
-  // shortly after another client flipped it.
-  useEffect(() => {
-    if (pinRequestTick === 0) return
-    if (m.pinned) {
-      unpinMut.mutate({ messageId: m.id })
-    } else {
-      pinMut.mutate({ messageId: m.id, pinnedByUserId: currentUserID })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinRequestTick])
+  }, [editRequest, isOwn, isMyLatest])
 
   function handleDelete() {
     if (!confirm('Delete this message?')) return
@@ -3155,7 +3253,7 @@ function MessageItem({
   // "Mentions me" check — true when the message has a mention notification
   // targeting the current user, *or* a channel-wide kind (which fans out
   // to me too). The visual cue is a left edge accent, applied only when
-  // not already highlighted/selected so we don't stack rings.
+  // not already highlighted/selected so we don't switchboard rings.
   const mentionsMe = (m.mentions ?? []).some((mn) =>
     mn.kind === 'user' ? mn.user_id === currentUserID : true,
   )
@@ -3164,6 +3262,7 @@ function MessageItem({
       data-message-id={m.id}
       className={
         'message-row group relative -mx-2 flex gap-3 rounded px-2 py-1 transition-colors duration-700 hover:bg-zinc-900/40 ' +
+        (isOwn ? 'flex-row-reverse ' : '') +
         (highlighted
           ? 'bg-amber-500/10 ring-1 ring-amber-500/40'
           : selected
@@ -3190,8 +3289,8 @@ function MessageItem({
           className="mt-0.5 shrink-0"
         />
       )}
-      <div className="min-w-0 flex-1">
-      <div className="flex items-baseline gap-2">
+      <div className={'min-w-0 flex-1 ' + (isOwn ? 'text-right' : '')}>
+      <div className={'flex items-baseline gap-2 ' + (isOwn ? 'flex-row-reverse' : '')}>
         {onUserClick && m.user_id ? (
           <button
             type="button"
@@ -3221,6 +3320,23 @@ function MessageItem({
           }}
           pending={editMut.isPending}
         />
+      ) : isTranscriptPayload(m.payload) ? (
+        // Server-authored transcript-ready message. Custom card with a
+        // "View" button that pops the segments dialog. We deliberately
+        // suppress the message's text body — the card subsumes it.
+        // currentUserID drives right-aligned bubbles for the viewer's
+        // own segments in the dialog.
+        <TranscriptCard
+          payload={m.payload}
+          members={memberMap}
+          currentUserID={currentUserID}
+        />
+      ) : isJamStartedPayload(m.payload) ? (
+        // Server posts this when a jam is created. The card pulls live
+        // state itself (via useJam) so it can flip "Join" vs "Ended"
+        // without prop drilling. Join button dispatches a window event
+        // the channel shell listens for — see OPEN_JAM_EVENT.
+        <JamCard payload={m.payload} channelId={channelId} />
       ) : m.payload ? (
         <div className="break-words">
           <MessageRender doc={m.payload as import('@tiptap/react').JSONContent} />
@@ -3807,6 +3923,20 @@ function Composer({
     },
   })
   editorRef.current = editor
+
+  // MessageList fires `switchboard:focus-composer` when the user ArrowDowns past
+  // the most recent message — yield focus back to the composer.
+  useEffect(() => {
+    function onFocus(e: Event) {
+      const ev = e as CustomEvent<{ channelId: string; mode: 'channel' | 'thread' }>
+      if (!ev.detail) return
+      if (ev.detail.channelId !== channelId) return
+      if (ev.detail.mode !== mode) return
+      editorRef.current?.commands.focus()
+    }
+    window.addEventListener('switchboard:focus-composer', onFocus)
+    return () => window.removeEventListener('switchboard:focus-composer', onFocus)
+  }, [channelId, mode])
 
   // Whatever's mounted gets its preview URLs revoked on unmount.
   useEffect(

@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { ChevronRight, SendHorizontal, X as XIcon } from 'lucide-react'
-import { api, APIError } from '@stack/client'
+import { api, APIError } from '@switchboard/client'
 
 // Server response shape from GET /v1/integrations/giphy/random?q=<query>.
 // Mirrors the GiphyPayload defined in plugins/giphy.tsx — kept local so the
