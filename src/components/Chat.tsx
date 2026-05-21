@@ -595,6 +595,7 @@ export function Chat({
                     members={
                       new Map((members ?? []).map((m) => [m.user_id, m]))
                     }
+                    currentUserID={user.id}
                     realtimeOpen={rtState === 'open'}
                   />
                 ),
@@ -3323,7 +3324,13 @@ function MessageItem({
         // Server-authored transcript-ready message. Custom card with a
         // "View" button that pops the segments dialog. We deliberately
         // suppress the message's text body — the card subsumes it.
-        <TranscriptCard payload={m.payload} members={memberMap} />
+        // currentUserID drives right-aligned bubbles for the viewer's
+        // own segments in the dialog.
+        <TranscriptCard
+          payload={m.payload}
+          members={memberMap}
+          currentUserID={currentUserID}
+        />
       ) : isHuddleStartedPayload(m.payload) ? (
         // Server posts this when a huddle is created. The card pulls live
         // state itself (via useHuddle) so it can flip "Join" vs "Ended"

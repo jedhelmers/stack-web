@@ -54,9 +54,13 @@ export function isTranscriptPayload(
 export function TranscriptCard({
   payload,
   members,
+  currentUserID,
 }: {
   payload: HuddleTranscriptPayload
   members?: Map<string, Member>
+  // When set, the transcript dialog aligns this user's segments on the
+  // right (mirroring the chat layout convention) instead of left.
+  currentUserID?: string
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -85,6 +89,7 @@ export function TranscriptCard({
         <TranscriptDialog
           recordingId={payload.recording_id}
           members={members}
+          currentUserID={currentUserID}
           onClose={() => setOpen(false)}
         />
       )}
@@ -95,10 +100,12 @@ export function TranscriptCard({
 function TranscriptDialog({
   recordingId,
   members,
+  currentUserID,
   onClose,
 }: {
   recordingId: string
   members?: Map<string, Member>
+  currentUserID?: string
   onClose: () => void
 }) {
   const { data, isLoading, isError } = useRecordingTranscript(recordingId)
@@ -157,7 +164,11 @@ function TranscriptDialog({
             <p className="text-sm text-zinc-400">No speech detected.</p>
           )}
           {data && data.transcript && data.transcript.length > 0 && (
-            <TranscriptSegments segments={data.transcript} members={members} />
+            <TranscriptSegments
+              segments={data.transcript}
+              members={members}
+              currentUserID={currentUserID}
+            />
           )}
         </div>
       </div>
@@ -168,9 +179,13 @@ function TranscriptDialog({
 function TranscriptSegments({
   segments,
   members,
+  currentUserID,
 }: {
   segments: HuddleTranscriptSegment[]
   members?: Map<string, Member>
+  // When provided, segments by this speaker render right-aligned with a
+  // distinct bubble color — same convention as the chat message feed.
+  currentUserID?: string
 }) {
   // Group consecutive segments from the same speaker into a single block —
   // way more readable than a per-segment dump. We re-segment on every
@@ -195,21 +210,41 @@ function TranscriptSegments({
   }
   return (
     <ul className="space-y-3">
-      {blocks.map((b, i) => (
-        <li key={i} className="flex gap-3">
-          <div className="w-16 shrink-0 pt-1 text-xs text-zinc-500 tabular-nums">
-            {formatOffset(b.startedAt)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium text-zinc-300">
-              {labelForSpeaker(b.speakerUserId, members)}
+      {blocks.map((b, i) => {
+        const isMe = currentUserID !== undefined && b.speakerUserId === currentUserID
+        // Right-aligned for the current user, left-aligned for everyone
+        // else. Timestamp swaps sides too so it always trails the bubble
+        // (chat convention: timestamp on the "outside" edge).
+        return (
+          <li
+            key={i}
+            className={'flex gap-3 ' + (isMe ? 'flex-row-reverse' : '')}
+          >
+            <div className="w-16 shrink-0 pt-1 text-xs text-zinc-500 tabular-nums text-right">
+              {formatOffset(b.startedAt)}
             </div>
-            <p className="mt-0.5 whitespace-pre-wrap text-sm text-zinc-100">
-              {b.segments.map((s) => s.text.trim()).join(' ')}
-            </p>
-          </div>
-        </li>
-      ))}
+            <div
+              className={
+                'min-w-0 max-w-[80%] ' + (isMe ? 'text-right' : 'text-left')
+              }
+            >
+              <div className="text-xs font-medium text-zinc-300">
+                {isMe ? 'You' : labelForSpeaker(b.speakerUserId, members)}
+              </div>
+              <p
+                className={
+                  'mt-0.5 inline-block whitespace-pre-wrap rounded-lg px-3 py-2 text-sm text-left ' +
+                  (isMe
+                    ? 'bg-emerald-600/20 text-emerald-50'
+                    : 'bg-zinc-800 text-zinc-100')
+                }
+              >
+                {b.segments.map((s) => s.text.trim()).join(' ')}
+              </p>
+            </div>
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -327,10 +362,14 @@ export function HuddleCard({
 export function RecordingsPanel({
   channelId,
   members,
+  currentUserID,
   realtimeOpen = false,
 }: {
   channelId: string
   members?: Map<string, Member>
+  // Forwards to the transcript dialog so the current user's segments
+  // render right-aligned, matching the chat layout convention.
+  currentUserID?: string
   realtimeOpen?: boolean
 }) {
   const { data, isLoading, isError } = useChannelRecordings(channelId, realtimeOpen)
@@ -387,6 +426,7 @@ export function RecordingsPanel({
         <TranscriptDialog
           recordingId={openId}
           members={members}
+          currentUserID={currentUserID}
           onClose={() => setOpenId(null)}
         />
       )}
