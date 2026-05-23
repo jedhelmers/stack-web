@@ -6,6 +6,7 @@ export { Chat } from './components/Chat'
 export { Dashboard } from './components/Dashboard'
 export { Login } from './components/Login'
 export { InviteAccept } from './components/InviteAccept'
+export { AddTenant, type AddTenantProps, type AddTenantValues } from './components/AddTenant'
 
 export { Modal, ModalProvider, useModal, type ModalSlot } from './components/Modal'
 export {
