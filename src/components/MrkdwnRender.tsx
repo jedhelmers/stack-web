@@ -8,6 +8,32 @@
 
 import { Fragment, type ReactNode } from 'react'
 import { parse, type MrkdwnNode } from '@switchboard/client/mrkdwn'
+import { codeLowlight } from './codeLowlight'
+
+// hast (HTML AST) shape produced by lowlight.highlight(). We only walk
+// the subset of node types lowlight actually emits.
+type HastNode =
+  | { type: 'text'; value: string }
+  | {
+      type: 'element'
+      tagName: string
+      properties?: { className?: string[]; [k: string]: unknown }
+      children: HastNode[]
+    }
+
+function renderHast(nodes: HastNode[]): ReactNode[] {
+  return nodes.map((n, i) => {
+    if (n.type === 'text') return <Fragment key={i}>{n.value}</Fragment>
+    const className = Array.isArray(n.properties?.className)
+      ? n.properties.className.join(' ')
+      : undefined
+    return (
+      <span key={i} className={className}>
+        {renderHast(n.children)}
+      </span>
+    )
+  })
+}
 
 // Same selector set as RichEditor uses for the TipTap output, minus the
 // editor-only bits, so mrkdwn and TipTap messages look identical.
@@ -53,12 +79,24 @@ function renderNode(node: MrkdwnNode, idx: number): ReactNode {
     }
     case 'code_inline':
       return <code key={idx}>{node.value}</code>
-    case 'code_block':
+    case 'code_block': {
+      const lang = node.lang && codeLowlight.registered(node.lang) ? node.lang : null
+      if (!lang) {
+        return (
+          <pre key={idx}>
+            <code>{node.value}</code>
+          </pre>
+        )
+      }
+      const tree = codeLowlight.highlight(lang, node.value)
       return (
         <pre key={idx}>
-          <code>{node.value}</code>
+          <code className={`hljs language-${lang}`}>
+            {renderHast(tree.children as HastNode[])}
+          </code>
         </pre>
       )
+    }
     case 'link': {
       const href = safeURL(node.url)
       const inner = node.children.map(renderNode)

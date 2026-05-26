@@ -8,10 +8,67 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { Extension, textblockTypeInputRule } from '@tiptap/core'
 import { exitCode } from '@tiptap/pm/commands'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { useEffect, useReducer, useRef } from 'react'
 import { resolvePayloadRenderer } from '@switchboard/client'
 import { Mention } from './MentionMark'
+import { codeLowlight } from './codeLowlight'
+
+// Slack-style: typing three backticks anywhere on an otherwise-empty line
+// immediately converts that paragraph into a code block. (StarterKit's
+// CodeBlock ships an input rule that requires a trailing space/newline,
+// which doesn't match the muscle memory of Slack/Discord users.)
+const SlackCodeBlock = Extension.create({
+  name: 'slackCodeBlock',
+  addInputRules() {
+    const codeBlockType = this.editor.schema.nodes.codeBlock
+    if (!codeBlockType) return []
+    return [textblockTypeInputRule({ find: /^```$/, type: codeBlockType })]
+  },
+})
+
+// Magic-comment language detection. Watches code-block content for a
+// first-line magic comment (`// python`, `# rust`, `-- sql`, `<!-- html -->`)
+// and updates the node's `language` attribute so CodeBlockLowlight picks
+// up the right grammar. Mirrors the parser-side behavior spec'd in
+// MRKDWN.md §3 rule 8a, so a code block round-trips the same lang
+// whether it was authored in the TipTap composer or arrived as raw
+// mrkdwn text from another client.
+const MAGIC_COMMENT_RE = /^\s*(?:\/\/|#|--|<!--)\s*([a-z][a-z0-9+#-]*)/
+
+const MagicCommentLang = Extension.create({
+  name: 'magicCommentLang',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('magicCommentLang'),
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some((t) => t.docChanged)) return null
+          let tr = newState.tr
+          let changed = false
+          newState.doc.descendants((node, pos) => {
+            if (node.type.name !== 'codeBlock') return
+            const text = node.textContent
+            const nlIndex = text.indexOf('\n')
+            const firstLine = nlIndex === -1 ? text : text.slice(0, nlIndex)
+            const match = MAGIC_COMMENT_RE.exec(firstLine)
+            const detected = match?.[1]
+            if (!detected) return
+            if (!codeLowlight.registered(detected)) return
+            const current = node.attrs.language ?? null
+            if (detected === current) return
+            tr = tr.setNodeAttribute(pos, 'language', detected)
+            changed = true
+          })
+          return changed ? tr : null
+        },
+      }),
+    ]
+  },
+})
 
 const editorClasses = [
   // Layout
@@ -77,10 +134,15 @@ export function useChatEditor(opts: EditorOpts = {}): Editor | null {
         // Disable headings and horizontal rule — Slack-style chat doesn't use them.
         heading: false,
         horizontalRule: false,
+        // Disable StarterKit's CodeBlock — we replace it with the
+        // lowlight-flavoured one below for syntax highlighting.
+        codeBlock: false,
+      }),
+      CodeBlockLowlight.configure({
+        lowlight: codeLowlight,
         // We exit code blocks on double-Enter (not the default triple-Enter)
-        // via the custom handleKeyDown below; turn off TipTap's built-in
-        // triple-Enter handler so the two don't fight.
-        codeBlock: { exitOnTripleEnter: false },
+        // via the custom handleKeyDown below.
+        exitOnTripleEnter: false,
       }),
       Underline,
       Link.configure({
@@ -96,6 +158,8 @@ export function useChatEditor(opts: EditorOpts = {}): Editor | null {
         placeholder: opts.placeholder ?? 'Message…',
       }),
       Mention,
+      SlackCodeBlock,
+      MagicCommentLang,
     ],
     editable: !opts.disabled,
     autofocus: false,
@@ -214,7 +278,8 @@ export function MessageRender({ doc }: { doc: JSONContent }) {
   // order stays stable across the doc/custom-payload toggle.
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ link: false, heading: false, horizontalRule: false }),
+      StarterKit.configure({ link: false, heading: false, horizontalRule: false, codeBlock: false }),
+      CodeBlockLowlight.configure({ lowlight: codeLowlight }),
       Underline,
       Link.configure({
         openOnClick: true,

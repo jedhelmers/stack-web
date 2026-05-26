@@ -17,6 +17,34 @@ type HighlightScale = 400
 type ScalePalette<K extends number> = Record<K, string>
 type PartialScale<K extends number> = Partial<ScalePalette<K>>
 
+/** Syntax-highlighting tokens for fenced code blocks. Backs the
+ *  `.hljs-*` CSS classes produced by lowlight. The default palette
+ *  approximates VS Code's "Dark+" theme. */
+export interface SwitchBoardSyntaxPalette {
+  /** Default text colour inside code blocks. Unhighlighted tokens. */
+  base: string
+  /** Language keywords (`if`, `return`, `fn`, …). */
+  keyword: string
+  /** String / character literals. */
+  string: string
+  /** Numeric literals. */
+  number: string
+  /** Comments (set in italic by default). */
+  comment: string
+  /** Function names / titles. */
+  function: string
+  /** Variable / property identifiers. */
+  variable: string
+  /** Types, classes, generics. */
+  type: string
+  /** Built-in identifiers, meta tokens, preprocessor directives. */
+  builtin: string
+  /** HTML/XML tag names. */
+  tag: string
+  /** HTML attribute names. */
+  attr: string
+}
+
 export interface SwitchBoardPalette {
   /** Body / prominent foreground text. Backs `<body>` and the
    *  `text-zinc-100` / `text-zinc-300` utilities. */
@@ -36,6 +64,8 @@ export interface SwitchBoardPalette {
   info: ScalePalette<InfoScale>
   /** Inline marks in the rich-text editor. Defaults to orange. */
   highlight: ScalePalette<HighlightScale>
+  /** Syntax highlighting for fenced code blocks. */
+  syntax: SwitchBoardSyntaxPalette
 }
 
 export interface SwitchBoardPaletteOverrides {
@@ -47,6 +77,7 @@ export interface SwitchBoardPaletteOverrides {
   danger?: PartialScale<DangerScale>
   info?: PartialScale<InfoScale>
   highlight?: PartialScale<HighlightScale>
+  syntax?: Partial<SwitchBoardSyntaxPalette>
 }
 
 /** Default palette, identical to the values shipped in `style.css`.
@@ -104,6 +135,20 @@ export const defaultDarkTheme: SwitchBoardPalette = {
   highlight: {
     400: 'oklch(75% 0.183 55.934)',
   },
+  syntax: {
+    // Approximate VS Code Dark+ token palette.
+    base: 'rgba(255, 255, 255, 0.7)',
+    keyword: '#569CD6',
+    string: '#CE9178',
+    number: '#B5CEA8',
+    comment: '#6A9955',
+    function: '#DCDCAA',
+    variable: '#9CDCFE',
+    type: '#4EC9B0',
+    builtin: '#569CD6',
+    tag: '#569CD6',
+    attr: '#9CDCFE',
+  },
 }
 
 type Scope = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'info' | 'highlight'
@@ -123,6 +168,12 @@ function collectVars(overrides: SwitchBoardPaletteOverrides): Array<[string, str
       const value = (scale as Record<string, string | undefined>)[shade]
       if (value === undefined) continue
       out.push([cssVar(scope, Number(shade)), value])
+    }
+  }
+  if (overrides.syntax) {
+    for (const [token, value] of Object.entries(overrides.syntax)) {
+      if (value === undefined) continue
+      out.push([`--switchboard-syntax-${token}`, value])
     }
   }
   return out
