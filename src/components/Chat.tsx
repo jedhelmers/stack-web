@@ -2795,8 +2795,9 @@ function MessageList({
   }, [data])
 
   // Arrow-key navigation through the loaded messages. Bound on window so it
-  // works whether the composer is focused or not (the user explicitly asked
-  // for this — it overrides TipTap's normal cursor movement). Escape clears.
+  // works whether the composer is focused or not. Arrows hand off to the
+  // composer's own cursor movement when the user is actively typing — see
+  // the contentEditable-with-text guard below. Escape clears.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') {
@@ -2805,6 +2806,17 @@ function MessageList({
       // Don't fight modifier-augmented arrows (Shift+Up for selection,
       // Cmd+Up for line jump in editors, etc.).
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      // If the user is actively typing in a contentEditable (composer or
+      // inline editor) AND there's text in it, let the editor own arrow
+      // keys — they navigate within the text. Empty composer still hands
+      // arrows back to message-nav so "press up on an empty line to grab
+      // the most recent message" keeps working.
+      if (e.key !== 'Escape') {
+        const focused = document.activeElement as HTMLElement | null
+        if (focused?.isContentEditable && (focused.textContent ?? '').trim() !== '') {
+          return
+        }
+      }
       if (e.key === 'Escape') {
         if (selectedId != null) {
           e.preventDefault()

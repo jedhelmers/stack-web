@@ -183,13 +183,19 @@ export function useChatEditor(opts: EditorOpts = {}): Editor | null {
         return true
       },
       handleKeyDown(_, event) {
-        if (event.key !== 'Enter') return false
-        // Editor instance for state queries / commands. We can read the
-        // current selection's structural context (list item, code block,
-        // blockquote) to decide whether Enter belongs to the editor or to
-        // the send action.
         const ed = editorInstanceRef.current
         if (!ed) return false
+
+        // Tab inside a code block inserts a literal tab. Without this the
+        // browser tabs to the next focusable element on the page, which
+        // ejects the user from the composer mid-snippet.
+        if (event.key === 'Tab' && !event.shiftKey && ed.isActive('codeBlock')) {
+          event.preventDefault()
+          ed.chain().focus().insertContent('\t').run()
+          return true
+        }
+
+        if (event.key !== 'Enter') return false
         const inListItem = ed.isActive('listItem')
         const inCodeBlock = ed.isActive('codeBlock')
         const inBlockquote = ed.isActive('blockquote')
