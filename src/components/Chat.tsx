@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { useQueryClient } from '@tanstack/react-query'
 import type { Editor } from '@tiptap/react'
 import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
+import { MrkdwnRender } from './MrkdwnRender'
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
 import { Jam } from './Jam'
@@ -3342,7 +3343,7 @@ function MessageItem({
           <MessageRender doc={m.payload as import('@tiptap/react').JSONContent} />
         </div>
       ) : m.text ? (
-        <p className="whitespace-pre-wrap break-words">{m.text}</p>
+        <MrkdwnRender text={m.text} />
       ) : null}
 
       {m.attachments && m.attachments.length > 0 && (
