@@ -21,6 +21,9 @@ type PartialScale<K extends number> = Partial<ScalePalette<K>>
  *  `.hljs-*` CSS classes produced by lowlight. The default palette
  *  approximates VS Code's "Dark+" theme. */
 export interface SwitchBoardSyntaxPalette {
+  /** Background of fenced code blocks. Distinct from the channel surface
+   *  so the block visually elevates from the surrounding message text. */
+  bg: string
   /** Default text colour inside code blocks. Unhighlighted tokens. */
   base: string
   /** Language keywords (`if`, `return`, `fn`, …). */
@@ -137,6 +140,9 @@ export const defaultDarkTheme: SwitchBoardPalette = {
   },
   syntax: {
     // Approximate VS Code Dark+ token palette.
+    // bg sits a notch lighter than `neutral-950` (the channel surface)
+    // so code blocks elevate visibly above the message body.
+    bg: '#1E1E1E',
     base: 'rgba(255, 255, 255, 0.7)',
     keyword: '#569CD6',
     string: '#CE9178',

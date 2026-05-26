@@ -79,6 +79,7 @@
      "Dark+" theme. Override per-token via `applyTheme({ syntax: ... })`
      or by redefining these vars in a host stylesheet — useful for
      light themes or brand-matched palettes. */
+  --switchboard-syntax-bg: #1E1E1E;
   --switchboard-syntax-base: rgba(255, 255, 255, 0.7);
   --switchboard-syntax-keyword: #569CD6;
   --switchboard-syntax-string: #CE9178;

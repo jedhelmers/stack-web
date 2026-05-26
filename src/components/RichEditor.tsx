@@ -89,7 +89,10 @@ const editorClasses = [
   '[&_blockquote]:border-l-2 [&_blockquote]:border-zinc-600 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-300',
   // Code: orange-on-dark for both inline `code` and code blocks.
   '[&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:text-orange-400',
-  '[&_pre]:my-1.5 [&_pre]:rounded [&_pre]:bg-zinc-950 [&_pre]:border [&_pre]:border-zinc-800 [&_pre]:p-3 [&_pre]:overflow-x-auto',
+  // text-left forces left alignment even inside an own-message bubble
+  // (which sets text-right on the wrapper). Tab-aligned code shouldn't
+  // re-flow to the right edge.
+  '[&_pre]:my-1.5 [&_pre]:rounded [&_pre]:bg-[var(--switchboard-syntax-bg)] [&_pre]:border [&_pre]:border-zinc-800 [&_pre]:p-3 [&_pre]:overflow-x-auto [&_pre]:text-left',
   '[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-sm [&_pre_code]:font-mono [&_pre_code]:text-white/70',
   // ProseMirror writes `is-empty` on a placeholder paragraph; the placeholder
   // extension drops a data attr we use to render the prompt text.
