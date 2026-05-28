@@ -17,7 +17,10 @@
       "Bash(grep -nA 8 \"useOpCreateWorkspace\" /Users/jedhelmers/Documents/GitHub/switchboard-web/node_modules/@switchboard/client/dist/hooks.d.ts)",
       "Bash(grep -iE \"^\\(layout|grid|user|pin|maximize|mic|volume|audio|video|monitor|square|sidebar|columns|panel|focus|sun|target\\).*\\\\.js$\")",
       "Bash(awk '{print $3}')",
-      "Bash(grep -iE \"^\\(LayoutGrid|Grid|GridIcon|PictureInPicture|Maximize|Maximize2|Square|Pin|PinOff|UserRound|UserMinus|UserX|AudioLines|Volume2|Speech|Sidebar|Columns|Columns2|Columns3|Columns4|PanelLeft|PanelRight|PanelTop|PanelBottom|Focus|Eye|EyeOff|MicVocal|Mic2|MonitorPlay\\)$\")"
+      "Bash(grep -iE \"^\\(LayoutGrid|Grid|GridIcon|PictureInPicture|Maximize|Maximize2|Square|Pin|PinOff|UserRound|UserMinus|UserX|AudioLines|Volume2|Speech|Sidebar|Columns|Columns2|Columns3|Columns4|PanelLeft|PanelRight|PanelTop|PanelBottom|Focus|Eye|EyeOff|MicVocal|Mic2|MonitorPlay\\)$\")",
+      "Bash(ls /Users/jedhelmers/Documents/GitHub/ 2>/dev/null | head -30)",
+      "Read(//Users/jedhelmers/Documents/GitHub/**)",
+      "Bash(grep -n \"/v1/files/{id}\\\\|/v1/files/\\\\$\\\\|getFile\" /Users/jedhelmers/Documents/GitHub/switchboard-web/node_modules/@switchboard/client/src/api/types.ts)"
     ]
   }
 }

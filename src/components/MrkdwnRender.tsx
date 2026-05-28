@@ -47,12 +47,12 @@ const renderClasses = [
   '[&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-1',
   '[&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-1',
   '[&_blockquote]:border-l-2 [&_blockquote]:border-zinc-600 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-300',
-  '[&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em] [&_code]:font-mono [&_code]:text-orange-400',
-  // text-left forces left alignment even inside an own-message bubble
-  // (which sets text-right on the wrapper). Tab-aligned code shouldn't
-  // re-flow to the right edge.
-  '[&_pre]:my-1.5 [&_pre]:rounded [&_pre]:bg-[var(--switchboard-syntax-bg)] [&_pre]:border [&_pre]:border-zinc-800 [&_pre]:p-3 [&_pre]:overflow-x-auto [&_pre]:text-left',
-  '[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-sm [&_pre_code]:font-mono [&_pre_code]:text-white/70',
+  '[&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-zinc-800 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:text-[0.9em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-orange-400',
+  // Code blocks: full width, always left aligned (the own-message wrapper
+  // sets text-right). `.hljs` rules in index.css own the per-token colors;
+  // don't set a competing `color` here.
+  '[&_pre]:my-2 [&_pre]:w-full [&_pre]:max-w-none [&_pre]:rounded-md [&_pre]:bg-[var(--switchboard-syntax-bg)] [&_pre]:border [&_pre]:border-zinc-800 [&_pre]:px-4 [&_pre]:py-3 [&_pre]:overflow-x-auto [&_pre]:text-left',
+  '[&_pre_code]:block [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[13px] [&_pre_code]:leading-relaxed [&_pre_code]:font-mono [&_pre_code]:text-left',
 ].join(' ')
 
 // Allowlist of URL schemes. The spec lets users put arbitrary text

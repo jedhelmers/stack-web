@@ -1,10 +1,20 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Editor } from '@tiptap/react'
 import { EditorView, MessageRender, docIsEmpty, useChatEditor } from './RichEditor'
 import { MrkdwnRender } from './MrkdwnRender'
 import { extractMentionsFromDoc, type MentionKind } from './MentionMark'
 import { GiphyPicker } from './GiphyPicker'
+import { installBuiltinPlugins } from '../plugins'
+
+// Register the built-in plugins (currently just /giphy) the moment Chat is
+// imported. Without this, a giphy payload arriving from another client
+// (which has no slash-command intercept on the receive path) would have no
+// renderer registered and `MessageRender` would fall through to TipTap with
+// a non-doc payload. Hosts that want a custom plugin set can still call
+// `installBuiltinPlugins()` / their own register* calls — the registry
+// silently overwrites on conflict.
+installBuiltinPlugins()
 import { Jam } from './Jam'
 import {
   isTranscriptPayload,
@@ -57,6 +67,7 @@ import {
   X,
 } from 'lucide-react'
 import {
+  api,
   APIError,
   uploadAttachment,
   useArchiveChannel,
@@ -3750,29 +3761,57 @@ function InlineEditor({
   )
 }
 
+// `Message.attachments` from bulk reads + realtime broadcasts omit `url` —
+// the server only signs URLs on the single-file fetch. Lazily fetch one when
+// we need it (e.g. to render the image thumbnail or follow the link).
+function useAttachmentURL(a: AttachmentFile): string | undefined {
+  const q = useQuery({
+    queryKey: ['file', a.id],
+    queryFn: () => api.get<AttachmentFile>(`/v1/files/${a.id}`),
+    enabled: !a.url,
+    // Presigned URLs are short-lived; let the cache go stale quickly so a
+    // tab left open eventually refetches.
+    staleTime: 5 * 60 * 1000,
+  })
+  return a.url ?? q.data?.url
+}
+
 function AttachmentView({ a }: { a: AttachmentFile }) {
-  const isImage = a.mime_type.startsWith('image/') && a.url
+  const url = useAttachmentURL(a)
+  const isImage = a.mime_type.startsWith('image/')
   if (isImage) {
-    // Cap visible size while preserving aspect ratio. Click opens full-size in a new tab.
     return (
       <li>
-        <a href={a.url} target="_blank" rel="noopener noreferrer">
-          <img
-            src={a.url}
-            alt={a.filename}
-            width={a.image_width}
-            height={a.image_height}
-            className="max-h-80 max-w-md rounded border border-zinc-800 object-contain bg-zinc-950"
-            loading="lazy"
-          />
-        </a>
+        {url ? (
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <img
+              src={url}
+              alt={a.filename}
+              width={a.image_width}
+              height={a.image_height}
+              className="max-h-80 max-w-md rounded border border-zinc-800 object-contain bg-zinc-950"
+              loading="lazy"
+            />
+          </a>
+        ) : (
+          <div
+            style={
+              a.image_width && a.image_height
+                ? { aspectRatio: `${a.image_width} / ${a.image_height}` }
+                : undefined
+            }
+            className="flex max-h-80 max-w-md min-h-[6rem] min-w-[6rem] items-center justify-center rounded border border-zinc-800 bg-zinc-950 text-xs text-zinc-500"
+          >
+            Loading…
+          </div>
+        )}
       </li>
     )
   }
   return (
     <li>
       <a
-        href={a.url}
+        href={url}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center gap-2 rounded border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
